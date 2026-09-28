@@ -37,3 +37,4 @@ To move existing data from your computer, copy the contents of your local `data/
 
 The `data/` folder is in `.gitignore` on purpose; it holds users, password hashes, and the secret key. Never commit it.
 # nsd
+# nsd
