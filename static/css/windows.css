@@ -1,0 +1,161 @@
+/* ============================
+   FLOATING WINDOW MANAGER
+   ============================ */
+
+#windows-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2000;
+}
+
+/* Outer element = positioning + resize handles only (overflow must stay
+   visible so the resize handles can poke out past the edge). */
+.floating-window {
+  position: fixed;
+  pointer-events: auto;
+}
+
+/* Inner element = the actual visual window chrome (clipped, rounded,
+   shadowed). Always fills the outer element. */
+.fw-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25), 0 2px 8px rgba(15, 23, 42, .08);
+  overflow: hidden;
+}
+
+.fw-titlebar {
+  height: 40px;
+  flex: 0 0 auto;
+  background: linear-gradient(#fafbfc, #f1f3f5);
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 14px;
+  cursor: move;
+  user-select: none;
+}
+
+.fw-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fw-controls {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.fw-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1;
+  color: #475569;
+  cursor: pointer;
+}
+
+.fw-btn:hover {
+  background: #e2e8f0;
+}
+
+.fw-close:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.fw-body {
+  flex: 1 1 auto;
+  position: relative;
+  background: #fff;
+  min-height: 0;
+}
+
+.fw-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.floating-window.is-shaded .fw-body {
+  display: none;
+}
+
+/* ---- Resize handles: all 4 edges + 4 corners ---- */
+
+.fw-resize {
+  position: absolute;
+}
+
+.fw-resize-n,
+.fw-resize-s {
+  left: 14px;
+  right: 14px;
+  height: 8px;
+  cursor: ns-resize;
+}
+.fw-resize-n { top: -4px; }
+.fw-resize-s { bottom: -4px; }
+
+.fw-resize-e,
+.fw-resize-w {
+  top: 14px;
+  bottom: 14px;
+  width: 8px;
+  cursor: ew-resize;
+}
+.fw-resize-e { right: -4px; }
+.fw-resize-w { left: -4px; }
+
+.fw-resize-ne,
+.fw-resize-nw,
+.fw-resize-se,
+.fw-resize-sw {
+  width: 16px;
+  height: 16px;
+  z-index: 2;
+}
+.fw-resize-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.fw-resize-nw { top: -4px; left: -4px;  cursor: nwse-resize; }
+.fw-resize-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.fw-resize-sw { bottom: -4px; left: -4px;  cursor: nesw-resize; }
+
+.floating-window.is-shaded .fw-resize {
+  display: none;
+}
+/* ---- Maximized: fills the screen under the header, flush, no window chrome.
+        Its controls move into the app header. ---- */
+.floating-window.is-max .fw-inner {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.floating-window.is-max .fw-titlebar { display: none; }
+.floating-window.is-max .fw-resize,
+.floating-window.is-split .fw-resize { display: none; }
+
+/* ---- Split screen halves: square edges, thin divider ---- */
+.floating-window.is-split .fw-inner {
+  border-radius: 0;
+  box-shadow: none;
+  border-top: 0;
+  border-bottom: 0;
+}
+.floating-window.is-left .fw-inner { border-left: 0; }
+.floating-window.is-right .fw-inner { border-right: 0; }

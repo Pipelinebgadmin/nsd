@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_title }}{% endblock %}
+
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+<div class="container my-4">
+  <!-- Page header (mirrors Dashboard spacing/typography) -->
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:-6px;">
+    <h2 class="section-title" style="margin:0;">
+      Products
+    </h2>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+{% if can('costs') %}
+      <div class="pill" style="display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid #e2e8f0; border-radius:999px; background:#f8fafc; color:#334155; font-size:.85rem; white-space:nowrap;">
+        Total inventory value: <strong>${{ '%.2f'|format(total_inventory_value or 0) }}</strong>
+      </div>
+      {% endif %}
+      {% if all_packages %}
+        <div class="pill" style="display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid #e2e8f0; border-radius:999px; background:#f8fafc; color:#334155; font-size:.85rem; white-space:nowrap;">
+          Unpackaged: <strong>{{ '%.2f'|format(total_unpackaged_gal or 0) }} GAL</strong>
+        </div>
+      {% endif %}
+      {% if can('products_edit') %}
+        <a href="{{ url_for('add_product') }}" class="btn btn-primary btn-sm">+ Add Product</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Products table card -->
+  <div class="card section-card shadow-sm">
+    {% if items and items|length %}
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Name</th>
+              <th>Default Unit</th>
+              <th class="text-nowrap">Qty</th>
+              <th class="text-nowrap">Gallons</th>
+              <th class="text-nowrap">Pounds</th>
+              {% for pkg in all_packages %}
+                <th class="text-nowrap text-center" style="font-size:.8rem;">
+                  {{ pkg.name }}<br>
+                  <span class="text-muted" style="font-size:.75rem;">{{ pkg.volume }} {{ pkg.unit | upper }}</span>
+                </th>
+              {% endfor %}
+              {% if all_packages %}
+                <th class="text-nowrap text-center" style="font-size:.8rem;">Unpackaged<br><span class="text-muted" style="font-size:.75rem;">GAL</span></th>
+              {% endif %}
+{% if can('costs') %}
+              <th class="text-nowrap">Unit Cost</th>
+              <th class="text-nowrap">Inv. Value</th>
+              {% endif %}
+              <th class="text-nowrap">Weight (LB/GAL)</th>
+              <th class="actions-col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for it in items %}
+            {% set p = it.raw %}
+            <tr>
+              <td class="fw-semibold">
+                <a class="text-decoration-none"
+                   href="{{ url_for('product_detail', product_id=p.id) }}">
+                  {{ p.name }}
+                </a>
+              </td>
+              <td>
+                <span class="badge badge-soft rounded-pill">{{ (p.default_unit or '').upper() }}</span>
+              </td>
+              <td class="font-monospace">{{ p.quantity }}</td>
+              <td class="font-monospace">
+                {{ it.gallons if it.gallons is not none else '' }}
+              </td>
+              <td class="font-monospace">
+                {{ it.pounds if it.pounds is not none else '' }}
+              </td>
+              {% set psummary = pkg_summaries.get(p.id|string, {}) %}
+              {% for pkg in all_packages %}
+                {% set pkgdata = psummary.get('by_package', {}).get(pkg.id|string, {}) %}
+                <td class="font-monospace text-center">
+                  {% if pkgdata and pkgdata.quantity > 0 %}
+                    {{ pkgdata.quantity | int }}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+              {% endfor %}
+              {% if all_packages %}
+                <td class="font-monospace text-center text-muted">
+                  {% set unpackaged = psummary.get('unpackaged_gal', none) %}
+                  {{ unpackaged if unpackaged is not none else '—' }}
+                </td>
+              {% endif %}
+{% if can('costs') %}
+              <td class="font-monospace">{{ p.unit_cost }}</td>
+              <td class="font-monospace">{{ it.inventory_value }}</td>
+              {% endif %}
+              <td class="font-monospace">
+                {{ p.weight if p.weight is not none else '' }}
+              </td>
+              <td>
+                <div class="d-flex flex-wrap gap-2">
+                  <a class="btn btn-sm btn-outline-secondary"
+                     href="{{ url_for('product_detail', product_id=p.id) }}">
+                    Details
+                  </a>
+                  <form method="post"
+                        action="{{ url_for('delete_product', product_id=p.id) }}"
+                        onsubmit="return confirm('Delete {{ p.name }}?');"
+                        class="m-0">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+      <div class="card-body">
+        <div class="text-muted">
+          No products yet.
+          {% if can('products_edit') %}<a href="{{ url_for('add_product') }}">Add your first product</a>.{% endif %}
+          Or jump to the <a href="{{ url_for('dashboard') }}">Dashboard</a>.
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+
+
+<!-- ==================== PACKAGES SECTION ==================== -->
+<h2 class="section-title" style="margin-top: 32px;">
+  Packages
+</h2>
+
+<div class="card section-card shadow-sm">
+  {% if packages and packages|length %}
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Package Name</th>
+            <th>Unit</th>
+            <th class="text-nowrap">Volume</th>
+{% if can('costs') %}<th class="text-nowrap">Cost</th>{% endif %}
+            <th class="text-nowrap">Supplier</th>
+            <th class="text-nowrap">Notes</th>
+            <th class="actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for pk in packages %}
+          <tr>
+            <td class="fw-semibold">{{ pk.name }}</td>
+            <td>
+              <span class="badge badge-soft rounded-pill">{{ (pk.unit or '').upper() }}</span>
+            </td>
+            <td class="font-monospace">{{ pk.volume }}</td>
+{% if can('costs') %}<td class="font-monospace">{{ pk.cost if pk.cost else '—' }}</td>{% endif %}
+            <td>{{ pk.supplier if pk.supplier else '—' }}</td>
+            <td class="text-muted" style="font-size:.85rem;">{{ pk.notes if pk.notes else '—' }}</td>
+            <td>
+              <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-sm btn-outline-secondary"
+                   href="{{ url_for('packages_edit', package_id=pk.id) }}">
+                  Edit
+                </a>
+                <form method="post"
+                      action="{{ url_for('packages_delete', package_id=pk.id) }}"
+                      onsubmit="return confirm('Delete {{ pk.name }}?');"
+                      class="m-0">
+                  <button class="btn btn-sm btn-outline-secondary" type="submit">Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+    <div class="card-body">
+      <div class="text-muted">
+        No packages yet. <a href="{{ url_for('packages_page') }}">Add your first package</a>.
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<div class="text-center py-3">
+  <a href="{{ url_for('packages_page') }}" class="btn btn-outline-secondary">
+    + Add Package
+  </a>
+</div>
+
+{% endblock %}

@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<style>
+  :root{
+    --bg:#f7f8fa;
+    --card:#fff;
+    --text:#0f172a;
+    --muted:#64748b;
+    --line:#e2e8f0;
+    --accent:#2563eb;
+    --danger:#ef4444
+  }
+  body{
+    background:var(--bg);
+    color:var(--text);
+  }
+  .wrap{
+    max-width:980px;
+    margin:24px auto;
+    padding:0 16px;
+  }
+  .row-inline{
+    display:flex;
+    gap:12px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:16px;
+  }
+  h1{
+    margin:0 0 6px;
+    font-size:22px;
+  }
+  .muted{
+    color:var(--muted);
+    font-size:14px;
+  }
+  label{
+    display:block;
+    margin:8px 0 6px;
+    color:#334155;
+    font-size:14px;
+  }
+  input,
+  select,
+  textarea{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:#fff;
+    font:inherit;
+  }
+  textarea{
+    min-height:90px;
+    resize:vertical;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+  }
+  .btn-plain{
+    appearance:none;
+    border:1px solid var(--line);
+    background:#fff;
+    padding:10px 14px;
+    border-radius:10px;
+    text-decoration:none;
+    color:#0f172a;
+    cursor:pointer;
+  }
+  .btn-plain.primary{
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#fff;
+  }
+  .btn-plain.danger{
+    background:var(--danger);
+    border-color:var(--danger);
+    color:#fff;
+  }
+  .flash{
+    padding:10px 12px;
+    border-radius:10px;
+    background:#fff1f2;
+    border:1px solid #fecdd3;
+    color:#9f1239;
+    margin-top:8px;
+  }
+  .mono{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  }
+  details{
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:#fff;
+    padding:10px 12px;
+  }
+  summary{
+    cursor:pointer;
+    font-weight:600;
+    color:#0f172a;
+  }
+  table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:10px;
+  }
+  th,td{
+    border-top:1px solid var(--line);
+    padding:8px 10px;
+    text-align:left;
+    font-size:14px;
+  }
+  th{
+    color:#334155;
+    font-weight:600;
+  }
+  .pill{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    font-size:12px;
+    border:1px solid var(--line);
+    background:#f8fafc;
+    color:#334155;
+  }
+</style>
+
+<div class="wrap">
+  <div class="row-inline" style="justify-content:space-between;">
+    <div>
+      <h1>{{ p.name }}</h1>
+      <div class="muted">
+        ID: <span class="mono">{{ p.id }}</span>
+      </div>
+    </div>
+
+    <div class="row-inline">
+      {# optional buttons could go here #}
+    </div>
+  </div>
+
+  {% if errors %}
+    {% for e in errors %}
+      <div class="flash">{{ e }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="card" style="margin-top:12px;">
+
+    {# =========================
+       SAVE FORM (only this form wraps fields)
+       ========================= #}
+    <form method="POST" action="{{ url_for('product_detail', product_id=p.id) }}">
+      <input type="hidden" name="action" value="save" />
+
+      <div class="grid">
+        <div>
+          <label for="name">Name *</label>
+          <input id="name" name="name" required value="{{ form.get('name','') }}" />
+        </div>
+
+        <div class="mb-3">
+          <label for="description" class="form-label">Description</label>
+          <input
+            type="text"
+            class="form-control"
+            id="description"
+            name="description"
+            maxlength="500"
+            value="{{ p.description or '' }}"
+            placeholder="Short product description (optional)"
+          >
+        </div>
+
+        <div>
+          <label for="cas">CAS</label>
+          <input id="cas" name="cas" value="{{ form.get('cas','') }}" />
+        </div>
+
+        <div>
+          <label for="default_unit">Default Unit *</label>
+          {% set du = (form.get('default_unit','') or '').lower() %}
+          <select id="default_unit" name="default_unit" required>
+            {% for v, label in [('gal','GAL'), ('lb','LB'), ('unit','UNIT')] %}
+              <option value="{{ v }}" {% if du==v %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+
+          {% set phase_value = (form.get('phase') if form else None) or (p.get('phase') if p else '') %}
+          <label for="phase" style="margin-top:10px;">Form *</label>
+          <select id="phase" name="phase" required>
+            <option value="" disabled {{ 'selected' if not phase_value else '' }}>Select phase</option>
+            <option value="liquid" {{ 'selected' if phase_value == 'liquid' else '' }}>Liquid</option>
+            <option value="solid"  {{ 'selected' if phase_value == 'solid'  else '' }}>Solid</option>
+          </select>
+        </div>
+
+{% if can('costs') %}
+        <div>
+          <label for="unit_cost">Unit Cost *</label>
+          <input
+            id="unit_cost"
+            name="unit_cost"
+            type="number"
+            step="any"
+            min="0"
+            required
+            value="{{ form.get('unit_cost','') }}"
+          />
+        </div>
+        {% endif %}
+
+        <div>
+          <label for="quantity">Quantity *</label>
+          <input
+            id="quantity"
+            name="quantity"
+            type="number"
+            step="any"
+            min="0"
+            required
+            value="{{ form.get('quantity','') }}"
+          />
+        </div>
+
+        <div id="weight-row">
+          <label for="weight">Weight (LB/GAL)</label>
+          <input
+            id="weight"
+            name="weight"
+            type="number"
+            step="any"
+            min="0"
+            value="{{ form.get('weight','') }}"
+          />
+        </div>
+
+        <div>
+          <label for="supplier">Supplier</label>
+          <input id="supplier" name="supplier" value="{{ form.get('supplier','') }}" />
+        </div>
+
+        <div>
+          <label for="package_type">Package Type</label>
+          <input
+            id="package_type"
+            name="package_type"
+            placeholder="e.g., Tote, Drum, Pail"
+            value="{{ form.get('package_type','') }}"
+          />
+        </div>
+
+        <div>
+          <label for="package_size_gal">Package Size (GAL)</label>
+          <input
+            id="package_size_gal"
+            name="package_size_gal"
+            type="number"
+            step="any"
+            min="0"
+            value="{{ form.get('package_size_gal','') }}"
+          />
+        </div>
+
+        <div>
+          <label for="location">Default Location (optional)</label>
+          <input id="location" name="location" value="{{ form.get('location','') }}" />
+        </div>
+
+        <div style="grid-column:1/-1">
+          <label for="notes">Notes</label>
+          <textarea id="notes" name="notes">{{ form.get('notes','') }}</textarea>
+        </div>
+      </div>
+
+      <!-- Bottom controls -->
+      <div class="row" style="justify-content:flex-end; gap:10px; margin-top:12px; display:flex;">
+        <button class="btn-plain primary" type="submit">Save Changes</button>
+
+        <button
+          class="btn-plain danger"
+          type="button"
+          onclick="if(confirm('Delete {{ p.name }}?')) { document.getElementById('deleteForm').submit(); }"
+        >
+          Delete
+        </button>
+      </div>
+    </form>
+
+    {# Separate delete form (NOT nested) #}
+    <form id="deleteForm"
+          method="POST"
+          action="{{ url_for('delete_product', product_id=p.id) }}"
+          style="display:none;">
+    </form>
+
+
+    {# =========================
+       Inventory by Location (NEW)
+       Expects backend var: location_rows = [{location, qty, unit, avg_cost, value}, ...]
+       ========================= #}
+    {% if location_rows is defined and location_rows and (location_rows|length) > 0 %}
+      <div style="margin-top:14px;">
+        <details open>
+          <summary>
+            Inventory by Location <span class="pill">{{ location_rows|length }}</span>
+          </summary>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Location</th>
+                <th style="width:140px;">Qty</th>
+                <th style="width:110px;">Unit</th>
+{% if can('costs') %}
+                <th style="width:140px;">Avg Cost</th>
+                <th style="width:140px;">Value</th>
+                {% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in location_rows %}
+                <tr>
+                  <td>{{ r.location }}</td>
+                  <td class="mono">{{ '%.4f'|format(r.qty or 0) }}</td>
+                  <td class="mono">{{ (r.unit or '')|upper }}</td>
+{% if can('costs') %}
+                  <td class="mono">${{ '%.4f'|format(r.avg_cost or 0) }}</td>
+                  <td class="mono">${{ '%.2f'|format(r.value or 0) }}</td>
+                  {% endif %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+      </div>
+    {% endif %}
+
+
+    <!-- Layers (Read-only display) -->
+    <div style="margin-top:14px;">
+      {% set layers = p.get('layers') if p else None %}
+      <details {% if layers and (layers|length) <= 3 %}open{% endif %}>
+        <summary>
+          Product History <span class="pill">{{ (layers|length) if layers else 0 }}</span>
+        </summary>
+
+        {% if not layers or (layers|length) == 0 %}
+          <div class="muted" style="margin-top:8px;">
+            No History.
+          </div>
+        {% else %}
+          <table>
+            <thead>
+              <tr>
+                <th style="width:120px;">Qty</th>
+                <th style="width:110px;">Unit</th>
+{% if can('costs') %}<th style="width:140px;">Unit Cost</th>{% endif %}
+                <th style="width:240px;">Date/Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for l in layers %}
+                <tr>
+                  <td class="mono">{{ '%.4f'|format(l.get('qty') or 0) }}</td>
+                  <td class="mono">{{ (l.get('unit') or p.get('default_unit') or '').upper() }}</td>
+{% if can('costs') %}<td class="mono">${{ '%.4f'|format(l.get('unit_cost') or 0) }}</td>{% endif %}
+                  <td class="mono">
+                    {% set dt = l.get('datetime') %}
+                    {{ dt and dt|datetimeformat("%b %d, %Y — %I:%M %p") }}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+
+          {% set total_qty = (p.get('quantity') or 0) %}
+          <div class="row-inline" style="justify-content:space-between;margin-top:10px;">
+            <div class="muted">
+              On-hand: <span class="mono">{{ '%.4f'|format(total_qty) }}</span>
+              {% if can('costs') %}
+              &nbsp;•&nbsp;
+              Avg cost: <span class="mono">${{ '%.4f'|format(p.get('unit_cost') or 0) }}</span>
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+      </details>
+    </div>
+
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  const phaseSel  = document.getElementById('phase');
+  const weight    = document.getElementById('weight');
+  const weightRow = document.getElementById('weight-row');
+  const du        = document.getElementById('default_unit');
+
+  function toggleWeight() {
+    const phase = phaseSel ? phaseSel.value : '';
+    if (phase === 'solid') {
+      if (weight) { weight.value = ''; weight.disabled = true; }
+      if (weightRow) weightRow.style.display = 'none';
+      // For solids, default to LB if it was GAL
+      if (du && du.value === 'gal') du.value = 'lb';
+    } else {
+      if (weight) { weight.disabled = false; }
+      if (weightRow) weightRow.style.display = '';
+    }
+  }
+
+  if (phaseSel) {
+    phaseSel.addEventListener('change', toggleWeight);
+    toggleWeight(); // initialize on load
+  }
+});
+</script>
+
+{% endblock %}

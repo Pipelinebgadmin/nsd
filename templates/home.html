@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+
+.home-wrap{
+  max-width:1200px;
+  margin:auto;
+  padding:20px 0 40px 0;
+}
+
+.home-title{
+  font-size:32px;
+  font-weight:700;
+  margin-bottom:6px;
+}
+
+.home-subtitle{
+  color:#6b7280;
+  font-size:14px;
+  margin-bottom:30px;
+}
+
+.workflow-section,
+.tools-section{
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:14px;
+  padding:28px;
+  box-shadow:0 4px 14px rgba(0,0,0,0.04);
+  margin-bottom:24px;
+}
+
+.section-label{
+  font-size:13px;
+  font-weight:700;
+  color:#6b7280;
+  letter-spacing:.05em;
+  margin-bottom:30px;
+}
+
+/* workflow layout */
+
+.workflow-grid{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:22px;
+  flex-wrap:wrap;
+}
+
+.workflow-arrow{
+  font-size:34px;
+  font-weight:700;
+  color:#94a3b8;
+  line-height:1;
+}
+
+/* cards */
+
+.workflow-card,
+.tool-card{
+  background:#fff;
+  border:1px solid #dbe3ea;
+  border-radius:14px;
+  width:150px;
+  min-height:110px;
+  padding:12px 10px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  text-align:center;
+  box-shadow:0 3px 10px rgba(0,0,0,0.04);
+  transition:.15s;
+}
+
+.workflow-card:hover,
+.tool-card:hover{
+  transform:translateY(-3px);
+  box-shadow:0 8px 18px rgba(0,0,0,.08);
+  border-color:#bfd3e6;
+}
+
+.workflow-card img,
+.tool-card img{
+  width:56px;
+  height:56px;
+  object-fit:contain;
+}
+
+.card-title{
+  font-weight:700;
+  font-size:15px;
+}
+
+.card-subtext{
+  font-size:12px;
+  color:#6b7280;
+}
+
+.card-link{
+  text-decoration:none;
+  color:inherit;
+}
+
+/* grids */
+
+.tools-grid{
+  display:flex;
+  justify-content:center;
+  gap:40px;
+  flex-wrap:wrap;
+}
+
+</style>
+
+<div class="home-wrap">
+
+  <h1 class="home-title">Home</h1>
+  <div class="home-subtitle">
+    Manage products, track inventory, and build blends across every location.
+  </div>
+
+  <!-- ================= WORKFLOW ================= -->
+  <div class="workflow-section">
+
+    <div class="section-label">INVENTORY WORKFLOW</div>
+
+    <div class="workflow-grid">
+      {% set wf = namespace(shown=false) %}
+
+      {% if can('adjust_inventory') %}
+      {% if wf.shown %}<div class="workflow-arrow">→</div>{% endif %}
+      <a href="{{ url_for('inventory_adjust_page') }}" class="card-link" data-win data-win-title="Adjust Inventory">
+        <div class="workflow-card">
+          <img src="{{ url_for('static', filename='images/adjustinventory.png') }}">
+          <div class="card-title">Adjust Inventory</div>
+          <div class="card-subtext">Receive & adjust stock</div>
+        </div>
+      </a>
+      {% set wf.shown = true %}
+      {% endif %}
+
+      {% if can(['blending', 'blend_builder']) %}
+      {% if wf.shown %}<div class="workflow-arrow">→</div>{% endif %}
+      <a href="{{ url_for('blend_new_page') }}" class="card-link" data-win data-win-title="Blend">
+        <div class="workflow-card">
+          <img src="{{ url_for('static', filename='images/blendbuilder.png') }}">
+          <div class="card-title">Blend</div>
+          <div class="card-subtext">Execute from a formula</div>
+        </div>
+      </a>
+      {% set wf.shown = true %}
+      {% endif %}
+
+    </div>
+
+  </div>
+
+  <!-- ================= INVENTORY TOOLS ================= -->
+  <div class="tools-section">
+
+    <div class="section-label">INVENTORY TOOLS</div>
+
+    <div class="tools-grid">
+
+      {% if can('dashboard') %}
+      <a href="{{ url_for('dashboard') }}" class="card-link" data-win data-win-title="Dashboard">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/dashboard.png') }}">
+          <div class="card-title">Dashboard</div>
+          <div class="card-subtext">KPIs & activity</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('inventory_view') %}
+      <a href="{{ url_for('inventory_overview') }}" class="card-link" data-win data-win-title="Inventory Overview">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/inventoryoverview.png') }}">
+          <div class="card-title">Inventory Overview</div>
+          <div class="card-subtext">All stock by location</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('inventory_view') %}
+      <a href="{{ url_for('live_inventory_page') }}" class="card-link" data-win data-win-title="Live Inventory">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/live.png') }}">
+          <div class="card-title">Live Inventory</div>
+          <div class="card-subtext">Per-location stock</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('products') %}
+      <a href="{{ url_for('list_products') }}" class="card-link" data-win data-win-title="Products">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/products.png') }}">
+          <div class="card-title">Products</div>
+          <div class="card-subtext">Manage catalog</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('spreadsheet') %}
+      <a href="{{ url_for('spreadsheet_page') }}" class="card-link" data-win data-win-title="Spreadsheet">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/sheets.png') }}">
+          <div class="card-title">Spreadsheet</div>
+          <div class="card-subtext">Bulk edit view</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('alerts') %}
+      <a href="{{ url_for('alerts_page') }}" class="card-link" data-win data-win-title="Reorder Alerts">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/reorderalerts.png') }}">
+          <div class="card-title">Reorder Alerts</div>
+          <div class="card-subtext">Low stock thresholds</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('locations') %}
+      <a href="{{ url_for('locations_page') }}" class="card-link" data-win data-win-title="Locations">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/locations.png') }}">
+          <div class="card-title">Locations</div>
+          <div class="card-subtext">Tanks & sites</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('formulas') %}
+      <a href="{{ url_for('formulas_page') }}" class="card-link" data-win data-win-title="Formula Catalog">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/formulacatalog.svg') }}">
+          <div class="card-title">Formula Catalog</div>
+          <div class="card-subtext">Saved blend recipes</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('reports') %}
+      <a href="{{ url_for('reports_center') }}" class="card-link" data-win data-win-title="Reports">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/sheets.png') }}">
+          <div class="card-title">Reports</div>
+          <div class="card-subtext">Print & export PDFs</div>
+        </div>
+      </a>
+      {% endif %}
+
+    </div>
+
+  </div>
+
+</div>
+
+{% endblock %}

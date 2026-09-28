@@ -1,0 +1,1720 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{overflow:hidden;}
+main.container-fluid{padding:0!important;margin:0!important;max-width:100%!important;}
+
+#app{
+  display:flex;flex-direction:column;
+  position:fixed;top:var(--navbar-h,57px);left:0;
+  width:100vw;height:calc(100vh - var(--navbar-h,57px));
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Calibri,Arial,sans-serif;
+  font-size:13px;color:#1a1a1a;background:#fff;z-index:100;
+}
+
+/* ── Toolbar ── */
+#toolbar{
+  display:flex;align-items:center;gap:1px;flex-wrap:nowrap;
+  padding:4px 8px;background:#fff;border-bottom:1px solid #e0e0e0;
+  flex-shrink:0;overflow-x:auto;
+}
+#toolbar::-webkit-scrollbar{height:0;}
+.tb-sep{width:1px;height:20px;background:#e0e0e0;margin:0 4px;flex-shrink:0;}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:3px 7px;min-height:26px;min-width:26px;
+  border:1px solid transparent;border-radius:3px;
+  background:transparent;color:#1a1a1a;cursor:pointer;
+  font-family:inherit;font-size:12px;line-height:1;
+  white-space:nowrap;flex-shrink:0;
+  transition:background .1s,border-color .1s;
+  -webkit-user-select:none;user-select:none;
+}
+.btn:hover{background:#f0f0f0;border-color:#d0d0d0;}
+.btn:active{background:#e4e4e4;}
+.btn.on{background:#dbeafe;border-color:#3b82f6;color:#1d4ed8;}
+.sel{
+  padding:2px 4px;height:26px;border:1px solid #d0d0d0;border-radius:3px;
+  background:#fff;font-family:inherit;font-size:12px;flex-shrink:0;
+}
+.color-btn{
+  position:relative;display:inline-flex;align-items:center;
+  padding:3px 7px;min-height:26px;border:1px solid transparent;border-radius:3px;
+  background:transparent;cursor:pointer;font-size:12px;flex-shrink:0;
+}
+.color-btn:hover{background:#f0f0f0;border-color:#d0d0d0;}
+.color-btn input[type=color]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+#save-indicator{
+  margin-left:auto;display:flex;align-items:center;gap:5px;
+  font-size:11px;color:#666;flex-shrink:0;padding:0 4px;
+}
+#save-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;transition:background .3s;}
+#save-dot.dirty{background:#ef4444;}
+
+/* ── Formula bar ── */
+#fbar{
+  display:flex;align-items:center;height:28px;
+  border-bottom:1px solid #e0e0e0;background:#fff;flex-shrink:0;
+}
+#namebox{
+  width:72px;min-width:72px;padding:0 6px;height:100%;
+  border:none;border-right:1px solid #e0e0e0;outline:none;
+  font-size:12px;font-weight:600;text-align:center;
+  font-family:inherit;background:#fff;
+}
+#namebox:focus{background:#eff6ff;}
+#fx-icon{
+  padding:0 8px;color:#888;font-style:italic;font-size:13px;
+  border-right:1px solid #e0e0e0;height:100%;display:flex;align-items:center;
+  cursor:default;user-select:none;flex-shrink:0;
+}
+#fbar-input{
+  flex:1;padding:0 8px;height:100%;border:none;outline:none;
+  font-family:Consolas,monospace;font-size:13px;background:#fff;
+}
+#fbar-input:focus{background:#fafeff;}
+
+/* ── Grid ── */
+#grid{flex:1;overflow:auto;position:relative;outline:none;}
+#grid::-webkit-scrollbar{width:12px;height:12px;}
+#grid::-webkit-scrollbar-track{background:#f5f5f5;}
+#grid::-webkit-scrollbar-thumb{background:#c0c0c0;border-radius:6px;border:2px solid #f5f5f5;}
+#grid::-webkit-scrollbar-thumb:hover{background:#a0a0a0;}
+#grid::-webkit-scrollbar-corner{background:#f5f5f5;}
+
+table{border-collapse:collapse;table-layout:fixed;}
+
+.ch-corner{
+  width:46px;min-width:46px;height:22px;
+  position:sticky;top:0;left:0;z-index:10;
+  background:#f5f5f5;border-right:1px solid #c0c0c0;border-bottom:1px solid #c0c0c0;
+}
+.ch-col{
+  height:22px;position:sticky;top:0;z-index:5;
+  background:#f5f5f5;border-right:1px solid #ddd;border-bottom:1px solid #c0c0c0;
+  font-size:11px;font-weight:600;color:#555;text-align:center;
+  cursor:pointer;user-select:none;white-space:nowrap;overflow:hidden;
+}
+.ch-col:hover{background:#eaeaea;}
+.ch-col.hl{background:#dbeafe;color:#1d4ed8;border-bottom-color:#3b82f6;}
+.rh{
+  width:46px;min-width:46px;position:sticky;left:0;z-index:4;
+  background:#f5f5f5;border-right:1px solid #c0c0c0;border-bottom:1px solid #ddd;
+  font-size:11px;color:#555;text-align:center;cursor:pointer;user-select:none;
+}
+.rh:hover{background:#eaeaea;}
+.rh.hl{background:#dbeafe;color:#1d4ed8;}
+
+td.cell{
+  height:22px;border-right:1px solid #ddd;border-bottom:1px solid #ddd;
+  padding:0;position:relative;cursor:cell;overflow:visible;
+}
+td.cell.sel-range{background:#dbeafe!important;}
+td.cell.anchor{z-index:3;}
+td.cell.anchor::after{
+  content:'';position:absolute;inset:0;
+  outline:2px solid #1d4ed8;outline-offset:-1px;
+  pointer-events:none;z-index:4;
+}
+.fh{
+  position:absolute;bottom:-4px;right:-4px;
+  width:7px;height:7px;background:#1d4ed8;border:2px solid #fff;
+  cursor:crosshair;z-index:6;border-radius:1px;
+}
+td.cell.copying{outline:2px dashed #1d4ed8;outline-offset:-1px;z-index:3;}
+td.cell.fml-hl{background:#bbf7d0!important;outline:1px solid #16a34a;outline-offset:-1px;z-index:2;}
+
+.cdiv{
+  padding:1px 4px;font-size:13px;height:22px;
+  display:flex;align-items:center;overflow:hidden;white-space:nowrap;
+  pointer-events:none;user-select:none;
+}
+.cdiv.r{justify-content:flex-end;}
+.cdiv.c{justify-content:center;}
+.cdiv.err{color:#dc2626;}
+
+input.cedit{
+  position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);
+  border:2px solid #1d4ed8;outline:none;
+  padding:1px 3px;font-size:13px;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Calibri,Arial,sans-serif;
+  background:#fff;z-index:20;box-sizing:border-box;
+  min-width:100px;
+}
+
+/* ── Status bar ── */
+/* ── Sheet tabs ── */
+#tabs{
+  display:flex;align-items:stretch;gap:0;padding:0 6px;
+  background:#f5f5f5;border-top:1px solid #e0e0e0;flex-shrink:0;height:30px;user-select:none;
+}
+#tab-list{display:flex;align-items:stretch;overflow-x:auto;min-width:0;}
+#tab-list::-webkit-scrollbar{height:0;}
+.stab{
+  display:flex;align-items:center;gap:5px;padding:0 14px;cursor:pointer;
+  font-size:12px;color:#444;border-right:1px solid #e0e0e0;white-space:nowrap;
+}
+.stab:hover{background:#ebebeb;}
+.stab.active{background:#fff;color:#0f5132;font-weight:600;box-shadow:inset 0 -2px 0 #16a34a;}
+.stab .lk{font-size:10px;}
+#tab-add{
+  border:0;background:transparent;font-size:18px;line-height:1;color:#555;padding:0 12px;cursor:pointer;
+}
+#tab-add:hover{background:#ebebeb;}
+#tabmenu{
+  position:fixed;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:4px;
+  box-shadow:0 4px 16px rgba(0,0,0,.15);min-width:140px;padding:4px 0;display:none;
+}
+
+#sbar{
+  display:flex;align-items:center;gap:16px;padding:2px 10px;
+  background:#f5f5f5;border-top:1px solid #e0e0e0;
+  font-size:11px;color:#555;flex-shrink:0;user-select:none;
+}
+#sbar .right{margin-left:auto;display:flex;gap:16px;}
+
+/* ── Context menu ── */
+#ctxmenu{
+  position:fixed;z-index:9999;background:#fff;
+  border:1px solid #ddd;border-radius:4px;
+  box-shadow:0 4px 16px rgba(0,0,0,.15);
+  min-width:160px;padding:4px 0;display:none;
+}
+.cx{padding:5px 14px;font-size:12px;cursor:pointer;color:#1a1a1a;}
+.cx:hover{background:#f0f0f0;}
+.cxsep{height:1px;background:#e8e8e8;margin:3px 0;}
+
+/* ── Find dialog ── */
+#finddlg{
+  display:none;position:fixed;top:80px;left:50%;transform:translateX(-50%);
+  z-index:9998;background:#fff;border:1px solid #ddd;border-radius:6px;
+  box-shadow:0 4px 20px rgba(0,0,0,.18);padding:16px;min-width:340px;
+}
+
+/* ── Formula tooltip ── */
+#fml-tip{
+  position:fixed;z-index:9997;
+  background:#1a1a1a;color:#fff;
+  font-size:11px;font-family:Consolas,monospace;
+  padding:5px 9px;border-radius:4px;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+  pointer-events:none;display:none;
+  max-width:320px;line-height:1.5;
+  white-space:pre-wrap;
+}
+#fml-tip b{color:#7dd3fc;}
+#fml-tip .tip-cur{color:#fde047;font-weight:bold;}
+</style>
+
+<div id="app">
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <!-- Clipboard -->
+    <button class="btn" id="btn-undo"  title="Undo (Ctrl+Z)">↩</button>
+    <button class="btn" id="btn-redo"  title="Redo (Ctrl+Y)">↪</button>
+    <div class="tb-sep"></div>
+    <button class="btn" id="btn-cut"   title="Cut (Ctrl+X)">✂</button>
+    <button class="btn" id="btn-copy"  title="Copy (Ctrl+C)">⧉</button>
+    <button class="btn" id="btn-paste" title="Paste (Ctrl+V)">📋</button>
+    <div class="tb-sep"></div>
+    <!-- Font -->
+    <select class="sel" id="sel-font" style="width:100px" title="Font">
+      <option>Calibri</option><option>Arial</option><option>Times New Roman</option>
+      <option>Courier New</option><option>Georgia</option><option>Verdana</option>
+    </select>
+    <select class="sel" id="sel-size" style="width:48px" title="Font size">
+      <option>8</option><option>9</option><option>10</option><option>11</option>
+      <option selected>12</option><option>14</option><option>16</option>
+      <option>18</option><option>20</option><option>24</option><option>28</option><option>36</option>
+    </select>
+    <div class="tb-sep"></div>
+    <button class="btn" id="btn-bold"  title="Bold (Ctrl+B)"><b>B</b></button>
+    <button class="btn" id="btn-it"    title="Italic (Ctrl+I)" style="font-style:italic">I</button>
+    <button class="btn" id="btn-ul"    title="Underline (Ctrl+U)" style="text-decoration:underline">U</button>
+    <button class="btn" id="btn-str"   title="Strikethrough" style="text-decoration:line-through">S</button>
+    <div class="color-btn" title="Fill color">🎨<input type="color" id="fill-clr" value="#ffff00"></div>
+    <div class="color-btn" title="Font color">A<input type="color" id="font-clr" value="#ff0000"></div>
+    <div class="tb-sep"></div>
+    <!-- Alignment -->
+    <button class="btn" id="btn-al" title="Align left">≡←</button>
+    <button class="btn" id="btn-ac" title="Center">≡↔</button>
+    <button class="btn" id="btn-ar" title="Align right">≡→</button>
+    <div class="tb-sep"></div>
+    <!-- Number format -->
+    <select class="sel" id="sel-fmt" style="width:96px" title="Number format">
+      <option value="gen">General</option>
+      <option value="num">Number</option>
+      <option value="cur">Currency ($)</option>
+      <option value="acc">Accounting</option>
+      <option value="pct">Percent (%)</option>
+      <option value="sci">Scientific</option>
+      <option value="date">Short Date</option>
+      <option value="time">Time</option>
+      <option value="txt">Text</option>
+    </select>
+    <button class="btn" id="btn-d-"  title="Fewer decimals">.0←</button>
+    <button class="btn" id="btn-d+"  title="More decimals">.00</button>
+    <div class="tb-sep"></div>
+    <!-- Cells -->
+    <button class="btn" id="btn-ir"  title="Insert row">+Row</button>
+    <button class="btn" id="btn-dr"  title="Delete row">−Row</button>
+    <button class="btn" id="btn-ic"  title="Insert column">+Col</button>
+    <button class="btn" id="btn-dc"  title="Delete column">−Col</button>
+    <div class="tb-sep"></div>
+    <!-- Editing -->
+    <button class="btn" id="btn-sum"  title="AutoSum">Σ</button>
+    <button class="btn" id="btn-az"   title="Sort A→Z">A↑Z</button>
+    <button class="btn" id="btn-za"   title="Sort Z→A">Z↓A</button>
+    <button class="btn" id="btn-find" title="Find & Replace (Ctrl+F)">🔍</button>
+    <button class="btn" id="btn-clrA" title="Clear all">✕All</button>
+    <button class="btn" id="btn-clrF" title="Clear format">✕Fmt</button>
+    <div class="tb-sep"></div>
+    <!-- NStock -->
+    <button class="btn" id="btn-nfl"  title="Refresh NFL data">↻ Data</button>
+    <button class="btn" id="btn-csv"  title="Export CSV">↓CSV</button>
+    <div id="save-indicator"><div id="save-dot"></div><span id="save-lbl">Saved</span></div>
+  </div>
+
+  <!-- Formula bar -->
+  <div id="fbar">
+    <input id="namebox" value="A1" spellcheck="false" autocomplete="off">
+    <span id="fx-icon"><i>fx</i></span>
+    <input id="fbar-input" placeholder="Enter value or formula…" spellcheck="false" autocomplete="off">
+  </div>
+
+  <!-- Grid -->
+  <div id="grid" tabindex="0"></div>
+
+  <!-- Sheet tabs -->
+  <div id="tabs">
+    <div id="tab-list"></div>
+    <button id="tab-add" title="Add sheet" aria-label="Add sheet">+</button>
+  </div>
+
+  <!-- Status bar -->
+  <div id="sbar">
+    <span id="s-mode">Ready</span>
+    <span id="s-cell">A1</span>
+    <div class="right">
+      <span id="s-sum"></span>
+      <span id="s-avg"></span>
+      <span id="s-cnt"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Sheet tab menu -->
+<div id="tabmenu">
+  <div class="cx" data-t="rename">Rename</div>
+  <div class="cx" data-t="delete" style="color:#dc2626">Delete</div>
+</div>
+
+<!-- Context menu -->
+<div id="ctxmenu">
+  <div class="cx" data-a="cut">✂ Cut</div>
+  <div class="cx" data-a="copy">⧉ Copy</div>
+  <div class="cx" data-a="paste">📋 Paste</div>
+  <div class="cxsep"></div>
+  <div class="cx" data-a="ir">Insert Row Above</div>
+  <div class="cx" data-a="ic">Insert Column Left</div>
+  <div class="cx" data-a="dr">Delete Row</div>
+  <div class="cx" data-a="dc">Delete Column</div>
+  <div class="cxsep"></div>
+  <div class="cx" data-a="clrA">Clear All</div>
+  <div class="cx" data-a="clrF">Clear Formatting</div>
+</div>
+
+<!-- Formula tooltip -->
+<div id="fml-tip"></div>
+
+<!-- Find & Replace -->
+<div id="finddlg">
+  <div style="font-weight:600;margin-bottom:10px;font-size:13px">Find & Replace</div>
+  <div style="display:flex;gap:8px;margin-bottom:8px">
+    <input id="find-q"   placeholder="Find…"        style="flex:1;padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:13px">
+    <input id="find-rep" placeholder="Replace with…" style="flex:1;padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:13px">
+  </div>
+  <div style="display:flex;gap:6px;align-items:center">
+    <button onclick="findNext(1)"  style="padding:4px 10px;background:#2563eb;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:12px">Find Next</button>
+    <button onclick="replaceOne()" style="padding:4px 10px;background:#fff;border:1px solid #ccc;border-radius:3px;cursor:pointer;font-size:12px">Replace</button>
+    <button onclick="replaceAll()" style="padding:4px 10px;background:#fff;border:1px solid #ccc;border-radius:3px;cursor:pointer;font-size:12px">Replace All</button>
+    <button onclick="closeFindDlg()" style="padding:4px 10px;background:#fff;border:1px solid #ccc;border-radius:3px;cursor:pointer;font-size:12px;margin-left:auto">✕</button>
+  </div>
+  <div id="find-status" style="font-size:11px;color:#666;margin-top:6px;height:16px"></div>
+</div>
+
+<script>
+// ================================================================
+//  NStock Excel Engine  —  clean rewrite focused on feel
+// ================================================================
+
+// ── Constants ────────────────────────────────────────────────────
+const CW = 100, RH = 22, RHW = 46, MAX_UNDO = 100;
+
+// ── State ────────────────────────────────────────────────────────
+let numR = 200, numC = 52;
+let cells = {}, fmt = {}, colW = {}, rowH = {};
+let sR = 0, sC = 0, sR2 = -1, sC2 = -1;   // anchor + range end
+let editing = false, editEl = null, editTd = null;
+let copyBuf = null, cutMode = false;
+let undoStack = [], redoStack = [];
+let dirty = false;
+let tbl = null;
+let _inCellClick = false;  // true while a cell-click is in progress (suppresses blur-commit)
+
+// NFL
+let NFL = {products:[],tanks:[],locations:[],vendors:[]};
+let nflReady = false;
+let spillO = {}, spillC = {};   // spill origins / children
+
+// ── Shortcuts ────────────────────────────────────────────────────
+const colName = i => { let s='',n=i+1; while(n>0){s=String.fromCharCode(64+(n%26||26))+s;n=Math.floor((n-1)/26);} return s; };
+const cid  = (r,c) => colName(c)+(r+1);
+const pref = s => { const m=s.trim().match(/^([A-Za-z]+)(\d+)$/); if(!m)return null; let c=0; for(const ch of m[1].toUpperCase())c=c*26+(ch.charCodeAt(0)-64); return [+m[2]-1,c-1]; };
+const cw   = c => colW[c] || CW;
+const rh   = r => rowH[r] || RH;
+const clamp= (v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+const r1   = ()=>sR2<0?sR:Math.min(sR,sR2);
+const c1   = ()=>sC2<0?sC:Math.min(sC,sC2);
+const r2   = ()=>sR2<0?sR:Math.max(sR,sR2);
+const c2   = ()=>sC2<0?sC:Math.max(sC,sC2);
+const grid = ()=>document.getElementById('grid');
+const getTd= (r,c)=>tbl?.querySelector(`td.cell[data-r="${r}"][data-c="${c}"]`);
+
+// ── Dirty / Save indicator ────────────────────────────────────────
+function markDirty(){ if(dirty)return; dirty=true; document.getElementById('save-dot').classList.add('dirty'); document.getElementById('save-lbl').textContent='Unsaved'; }
+function markSaved(){ dirty=false; document.getElementById('save-dot').classList.remove('dirty'); document.getElementById('save-lbl').textContent='Saved'; }
+
+// ── Undo / Redo ──────────────────────────────────────────────────
+function snap(){ undoStack.push({c:JSON.parse(JSON.stringify(cells)),f:JSON.parse(JSON.stringify(fmt))}); if(undoStack.length>MAX_UNDO)undoStack.shift(); redoStack=[]; }
+function undo(){ if(!undoStack.length)return; redoStack.push({c:JSON.parse(JSON.stringify(cells)),f:JSON.parse(JSON.stringify(fmt))}); const s=undoStack.pop(); cells=s.c;fmt=s.f; rebuildTbl(); markDirty(); qSave(); }
+function redo(){ if(!redoStack.length)return; undoStack.push({c:JSON.parse(JSON.stringify(cells)),f:JSON.parse(JSON.stringify(fmt))}); const s=redoStack.pop(); cells=s.c;fmt=s.f; rebuildTbl(); markDirty(); qSave(); }
+
+// ================================================================
+//  FORMULA ENGINE  —  safe, readable, handles =B2+B3 etc.
+// ================================================================
+
+// Evaluate a raw cell value — returns number or string
+function getCellVal(id, visited=new Set()){
+  if(visited.has(id)) return '#CIRC!';
+  const raw = cells[id];
+  if(raw==null||raw==='') return '';
+  if(!raw.startsWith('=')){ const n=+raw; return isNaN(n)||raw.trim()===''?raw:n; }
+  // For spill origin cells (NFL formulas like =PRODUCTS()), evalF can't handle them.
+  // Read the displayed text from the DOM instead so QTY(0, A1) works when A1 is a PRODUCTS() origin.
+  if(spillO[id]){
+    const p=pref(id);
+    if(p){
+      const td=getTd(p[0],p[1]);
+      const dv=td?.querySelector('.cdiv');
+      if(dv){ const t=(dv.textContent||'').trim(); const n=+t; return isNaN(n)||t===''?t:n; }
+    }
+    return '';
+  }
+  visited.add(id);
+  let res;
+  try { res = evalF(raw.slice(1).trim(), new Set(visited)); }
+  catch(e){ res='#ERR!'; }
+  visited.delete(id);
+  return res??'';
+}
+
+// Main formula evaluator — takes expression string, returns value
+function evalF(expr, visited=new Set()){
+  // Step 1: resolve range refs like A1:B3 → array of values
+  // Step 2: resolve cell refs like B2 → value
+  // Step 3: call built-in functions
+  // Step 4: evaluate math expression safely
+
+  // Wrap string so we can work with it
+  let e = expr.trim();
+
+  // ── 0. NStock live formulas (before cell-ref expansion so they can resolve refs themselves) ──
+  e = e.replace(/\bQTY\s*\(\s*(0|1)\s*,\s*([^)]+?)\s*\)/gi, (_, mode, refRaw) => {
+    if(!nflReady) return '"⟳"';
+    refRaw = refRaw.trim();
+    let productName;
+    const cellP = pref(refRaw);
+    if(cellP){
+      // Resolve cell reference — strip quotes if cell value is a quoted string formula result
+      let cellVal = getCellVal(cid(cellP[0],cellP[1]),visited);
+      if(cellVal == null) cellVal = '';
+      productName = String(cellVal).replace(/^["']|["']$/g,'').replace(/\u00a0/g,' ').trim();
+    } else {
+      productName = refRaw.replace(/^["']|["']$/g,'').replace(/\u00a0/g,' ').trim();
+    }
+    if(!productName) return '""';
+    // Normalize both sides: collapse whitespace, lowercase for robust matching
+    const normP = s => s.replace(/\s+/g,' ').trim().toLowerCase();
+    const pNorm = normP(productName);
+    const prod = NFL.products.find(p=>normP(p.name)===pNorm);
+    if(!prod){
+      console.warn('[QTY] No match. Looking for:', JSON.stringify(productName), '| Available:', NFL.products.map(p=>JSON.stringify(p.name)));
+      return '"#N/A"';
+    }
+    const m = parseInt(mode);
+    if(m===0){
+      if(prod.qty_gal!=null) return prod.qty_gal;
+      if((prod.unit||'').toUpperCase()==='GAL') return prod.onhand;
+      return '"#N/A"';
+    } else {
+      if(prod.qty_lb!=null) return prod.qty_lb;
+      if((prod.unit||'').toUpperCase()==='LB') return prod.onhand;
+      return '"#N/A"';
+    }
+  });
+
+  // ── 1. Functions that need range args (before range expansion) ──
+  e = e.replace(/\b(SUM|AVERAGE|AVG|MIN|MAX|COUNT|COUNTA|COUNTBLANK|PRODUCT|SUMSQ|STDEV|MEDIAN)\s*\(([^)]*)\)/gi,
+    (_, fn, args) => {
+      const vals = expandArgs(args, visited);
+      return String(applyAgg(fn.toUpperCase(), vals));
+    });
+
+  // ── 2. Cell refs ──
+  // Replace remaining A1-style refs with their values
+  e = e.replace(/\b([A-Za-z]{1,3}\d{1,7})\b/g, (_, ref) => {
+    const p = pref(ref); if(!p) return ref;
+    const id = cid(p[0],p[1]);
+    const v = getCellVal(id, visited);
+    if(typeof v==='string') return '"'+v.replace(/"/g,'\\"')+'"';
+    return String(v);
+  });
+
+  // ── 3. Remaining functions (work on resolved values) ──
+  e = applyFns(e);
+
+  // ── 4. Eval the math expression ──
+  try {
+    // safety: only allow math-safe chars
+    const safe = /^[\d\s\+\-\*\/\%\^\(\)\.,<>=!&|"'a-zA-Z_]+$/.test(e);
+    const result = Function('"use strict";return('+e+')')();
+    if(result===undefined||result===null) return '';
+    return result;
+  } catch { return '#ERR!'; }
+}
+
+// Expand function args — handles ranges A1:B3 and comma-separated refs
+function expandArgs(args, visited){
+  const vals = [];
+  // First expand range refs
+  const expanded = args.replace(/([A-Za-z]{1,3}\d{1,7}):([A-Za-z]{1,3}\d{1,7})/g, (_, a, b) => {
+    const pa=pref(a),pb=pref(b); if(!pa||!pb) return '0';
+    const parts=[];
+    for(let r=Math.min(pa[0],pb[0]);r<=Math.max(pa[0],pb[0]);r++)
+      for(let c=Math.min(pa[1],pb[1]);c<=Math.max(pa[1],pb[1]);c++)
+        parts.push(cid(r,c));
+    return parts.join(',');
+  });
+  // Now each token is either a cell ref or a literal
+  expanded.split(',').forEach(tok => {
+    tok = tok.trim();
+    if(!tok) return;
+    const p = pref(tok);
+    if(p){ const v=getCellVal(cid(p[0],p[1]),visited); if(v!=='')vals.push(v); }
+    else { const n=+tok; if(!isNaN(n))vals.push(n); }
+  });
+  return vals;
+}
+
+function applyAgg(fn, vals){
+  const nums = vals.map(v=>+v).filter(v=>!isNaN(v));
+  switch(fn){
+    case 'SUM':       return nums.reduce((a,b)=>a+b,0);
+    case 'AVERAGE': case 'AVG': return nums.length?nums.reduce((a,b)=>a+b,0)/nums.length:0;
+    case 'MIN':       return nums.length?Math.min(...nums):0;
+    case 'MAX':       return nums.length?Math.max(...nums):0;
+    case 'COUNT':     return nums.length;
+    case 'COUNTA':    return vals.filter(v=>v!=='').length;
+    case 'COUNTBLANK':return vals.filter(v=>v==='').length;
+    case 'PRODUCT':   return nums.reduce((a,b)=>a*b,1);
+    case 'SUMSQ':     return nums.reduce((a,b)=>a+b*b,0);
+    case 'STDEV':     { const m=nums.reduce((a,b)=>a+b,0)/nums.length; return Math.sqrt(nums.reduce((a,b)=>a+(b-m)**2,0)/(nums.length-1)); }
+    case 'MEDIAN':    { const s=[...nums].sort((a,b)=>a-b),l=s.length; return l%2?s[Math.floor(l/2)]:(s[l/2-1]+s[l/2])/2; }
+    default: return 0;
+  }
+}
+
+// All the single-value / utility functions
+function applyFns(e){
+  // Apply repeatedly to handle nested calls (up to 10 passes)
+  for(let i=0;i<10;i++){
+    const prev=e;
+    e=e
+      // Math
+      .replace(/\bABS\s*\(([^()]+)\)/gi,      (_,v)=>Math.abs(+v||0))
+      .replace(/\bSQRT\s*\(([^()]+)\)/gi,     (_,v)=>Math.sqrt(+v||0))
+      .replace(/\bPOWER\s*\(([^(),]+),([^()]+)\)/gi,(_,b,x)=>Math.pow(+b||0,+x||0))
+      .replace(/\bEXP\s*\(([^()]+)\)/gi,      (_,v)=>Math.exp(+v||0))
+      .replace(/\bLN\s*\(([^()]+)\)/gi,       (_,v)=>Math.log(+v||0))
+      .replace(/\bLOG10\s*\(([^()]+)\)/gi,    (_,v)=>Math.log10(+v||0))
+      .replace(/\bLOG\s*\(([^(),]+),([^()]+)\)/gi,(_,v,b)=>Math.log(+v)/Math.log(+b))
+      .replace(/\bLOG\s*\(([^()]+)\)/gi,      (_,v)=>Math.log10(+v||0))
+      .replace(/\bMOD\s*\(([^(),]+),([^()]+)\)/gi,(_,a,b)=>(+a||0)%(+b||1))
+      .replace(/\bINT\s*\(([^()]+)\)/gi,      (_,v)=>Math.floor(+v||0))
+      .replace(/\bROUND\s*\(([^(),]+),([^()]+)\)/gi,(_,v,d)=>{const dp=+d||0;return Math.round((+v||0)*10**dp)/10**dp;})
+      .replace(/\bROUNDUP\s*\(([^(),]+),([^()]+)\)/gi,(_,v,d)=>{const dp=+d||0;return Math.ceil((+v||0)*10**dp)/10**dp;})
+      .replace(/\bROUNDDOWN\s*\(([^(),]+),([^()]+)\)/gi,(_,v,d)=>{const dp=+d||0;return Math.floor((+v||0)*10**dp)/10**dp;})
+      .replace(/\bTRUNC\s*\(([^(),]+),?([^()]*)\)/gi,(_,v,d)=>{const dp=+d||0;return Math.trunc((+v||0)*10**dp)/10**dp;})
+      .replace(/\bFLOOR\s*\(([^(),]+),([^()]+)\)/gi,(_,v,s)=>Math.floor((+v||0)/(+s||1))*(+s||1))
+      .replace(/\bCEILING\s*\(([^(),]+),([^()]+)\)/gi,(_,v,s)=>Math.ceil((+v||0)/(+s||1))*(+s||1))
+      .replace(/\bSIGN\s*\(([^()]+)\)/gi,     (_,v)=>Math.sign(+v||0))
+      .replace(/\bRAND\s*\(\s*\)/gi,           ()=>Math.random())
+      .replace(/\bRANDBETWEEN\s*\(([^(),]+),([^()]+)\)/gi,(_,lo,hi)=>Math.floor(Math.random()*(+hi-+lo+1))+Number(lo))
+      .replace(/\bPI\s*\(\s*\)/gi,             ()=>Math.PI)
+      .replace(/\bSIN\s*\(([^()]+)\)/gi,       (_,v)=>Math.sin(+v||0))
+      .replace(/\bCOS\s*\(([^()]+)\)/gi,       (_,v)=>Math.cos(+v||0))
+      .replace(/\bTAN\s*\(([^()]+)\)/gi,       (_,v)=>Math.tan(+v||0))
+      .replace(/\bATAN2\s*\(([^(),]+),([^()]+)\)/gi,(_,y,x)=>Math.atan2(+y||0,+x||0))
+      // Text
+      .replace(/\bLEN\s*\(([^()]+)\)/gi,         (_,v)=>unq(v).length)
+      .replace(/\bUPPER\s*\(([^()]+)\)/gi,        (_,v)=>'"'+unq(v).toUpperCase()+'"')
+      .replace(/\bLOWER\s*\(([^()]+)\)/gi,        (_,v)=>'"'+unq(v).toLowerCase()+'"')
+      .replace(/\bPROPER\s*\(([^()]+)\)/gi,       (_,v)=>'"'+unq(v).replace(/\b\w/g,c=>c.toUpperCase())+'"')
+      .replace(/\bTRIM\s*\(([^()]+)\)/gi,         (_,v)=>'"'+unq(v).trim()+'"')
+      .replace(/\bLEFT\s*\(([^(),]+),([^()]+)\)/gi, (_,v,n)=>'"'+unq(v).slice(0,+n||0)+'"')
+      .replace(/\bRIGHT\s*\(([^(),]+),([^()]+)\)/gi,(_,v,n)=>'"'+unq(v).slice(-(+n||0))+'"')
+      .replace(/\bMID\s*\(([^(),]+),([^(),]+),([^()]+)\)/gi,(_,v,s,l)=>'"'+unq(v).slice((+s||1)-1,(+s||1)-1+(+l||0))+'"')
+      .replace(/\bSUBSTITUTE\s*\(([^(),]+),([^(),]+),([^()]+)\)/gi,(_,t,f,r)=>'"'+unq(t).split(unq(f)).join(unq(r))+'"')
+      .replace(/\bREPT\s*\(([^(),]+),([^()]+)\)/gi,(_,v,n)=>'"'+unq(v).repeat(Math.max(0,+n||0))+'"')
+      .replace(/\bCONCAT\s*\(([^()]+)\)/gi,        (_,a)=>'"'+a.split(',').map(v=>unq(v.trim())).join('')+'"')
+      .replace(/\bCONCATENATE\s*\(([^()]+)\)/gi,   (_,a)=>'"'+a.split(',').map(v=>unq(v.trim())).join('')+'"')
+      .replace(/\bVALUE\s*\(([^()]+)\)/gi,          (_,v)=>parseFloat(unq(v))||0)
+      .replace(/\bTEXT\s*\(([^(),]+),([^()]+)\)/gi, (_,v)=>'"'+String(+v||0)+'"')
+      .replace(/\bCHAR\s*\(([^()]+)\)/gi,           (_,v)=>'"'+String.fromCharCode(+v||0)+'"')
+      .replace(/\bCODE\s*\(([^()]+)\)/gi,           (_,v)=>unq(v).charCodeAt(0)||0)
+      // Logic
+      .replace(/\bTRUE\b/gi,'true').replace(/\bFALSE\b/gi,'false')
+      .replace(/\bNOT\s*\(([^()]+)\)/gi,  (_,v)=>!tryBool(v))
+      .replace(/\bAND\s*\(([^()]+)\)/gi,  (_,a)=>a.split(',').every(v=>tryBool(v.trim())))
+      .replace(/\bOR\s*\(([^()]+)\)/gi,   (_,a)=>a.split(',').some(v=>tryBool(v.trim())))
+      .replace(/\bIFERROR\s*\(([^,]+),([^)]+)\)/gi,(_,v,fb)=>{
+        try{const r=Function('"use strict";return('+v+')')();return(r==null||String(r).startsWith('#'))?fb:r;}catch{return fb;}
+      })
+      .replace(/\bISBLANK\s*\(([^()]+)\)/gi,  (_,v)=>v.trim()===''||v.trim()==='""')
+      .replace(/\bISNUMBER\s*\(([^()]+)\)/gi, (_,v)=>!isNaN(+v.trim()))
+      .replace(/\bISTEXT\s*\(([^()]+)\)/gi,   (_,v)=>v.trim().startsWith('"'))
+      // Date
+      .replace(/\bTODAY\s*\(\s*\)/gi,  ()=>Math.floor(Date.now()/86400000)-25569)
+      .replace(/\bNOW\s*\(\s*\)/gi,    ()=>Date.now()/86400000-25569)
+      .replace(/\bYEAR\s*\(([^()]+)\)/gi,  (_,v)=>new Date((+v+25569)*86400000).getFullYear())
+      .replace(/\bMONTH\s*\(([^()]+)\)/gi, (_,v)=>new Date((+v+25569)*86400000).getMonth()+1)
+      .replace(/\bDAY\s*\(([^()]+)\)/gi,   (_,v)=>new Date((+v+25569)*86400000).getDate())
+      .replace(/\bDATE\s*\(([^(),]+),([^(),]+),([^()]+)\)/gi,(_,y,m,d)=>Math.floor(new Date(+y,+m-1,+d).getTime()/86400000)-25569)
+      .replace(/\bWEEKDAY\s*\(([^()]+)\)/gi,(_,v)=>new Date((+v+25569)*86400000).getDay()+1)
+      // IF — handle carefully, last resort
+      .replace(/\bIF\s*\(([^,]+),([^,]+),([^)]+)\)/gi,(_,cond,t,f)=>{
+        try{ return Function('"use strict";return !!('+cond+')')() ? t.trim() : f.trim(); }
+        catch{ return f.trim(); }
+      })
+      .replace(/\bIFS\s*\(([^)]+)\)/gi,(_,a)=>{
+        const pts=a.split(',');
+        for(let i=0;i<pts.length-1;i+=2){try{if(Function('"use strict";return !!('+pts[i]+')')())return pts[i+1].trim();}catch{}}
+        return '#N/A';
+      })
+      // Financial
+      .replace(/\bPMT\s*\(([^(),]+),([^(),]+),([^()]+)\)/gi,(_,r,n,pv)=>{
+        const rate=+r,nper=+n,pval=+pv;
+        if(rate===0) return -pval/nper;
+        return -(pval*rate)/(1-Math.pow(1+rate,-nper));
+      });
+    if(e===prev) break;
+  }
+  return e;
+}
+
+function unq(s){ const t=s.trim(); return t.startsWith('"')&&t.endsWith('"')?t.slice(1,-1):t; }
+function tryBool(s){ try{return !!Function('"use strict";return('+s+')')();}catch{return false;} }
+
+// ── Format a value for display ────────────────────────────────────
+function fmtVal(id){
+  const raw=cells[id]??'';
+  const f=fmt[id]??{};
+  const ERRS=['#ERR!','#CIRC!','#N/A','#VALUE!','#REF!','#DIV/0!','#NUM!'];
+
+  let val;
+  if(raw===''){ return{txt:'',cls:''}; }
+  if(raw.startsWith('=')){
+    try{ val=evalF(raw.slice(1).trim()); }
+    catch{ return{txt:'#ERR!',cls:'err'}; }
+    if(val==null) val='';
+  } else { val = raw; }
+
+  const s=String(val);
+  if(ERRS.some(e=>s.startsWith(e.slice(0,4)))) return{txt:s,cls:'err'};
+
+  // Number formatting
+  const ft=f.format||'gen', dp=f.decimals??2;
+  const n = typeof val==='number' ? val : (raw.startsWith('=')?parseFloat(s):parseFloat(raw));
+  const isNum = !isNaN(n) && (typeof val==='number' || (!isNaN(+raw)&&raw.trim()!==''));
+
+  if(isNum){
+    const L=(v,d)=>v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+    if(ft==='num')  return{txt:L(n,dp),cls:'r'};
+    if(ft==='cur')  return{txt:'$'+L(n,dp),cls:'r'};
+    if(ft==='acc')  return{txt:'$ '+L(n,dp),cls:'r'};
+    if(ft==='pct')  return{txt:L(n*100,dp)+'%',cls:'r'};
+    if(ft==='sci')  return{txt:n.toExponential(dp),cls:'r'};
+    if(ft==='date'){ const d=new Date((n+25569)*86400000); return{txt:`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`,cls:''}; }
+    if(ft==='time'){ const fr=(n%1+1)%1,h=Math.floor(fr*24),m=Math.floor((fr*24-h)*60); return{txt:`${h}:${String(m).padStart(2,'0')}`,cls:''}; }
+    if(ft==='txt')  return{txt:String(raw),cls:''};
+    // General — show integer cleanly, float up to 10 sig digits
+    const disp = Number.isInteger(n)?String(n):parseFloat(n.toPrecision(10)).toString();
+    return{txt:disp,cls:'r'};
+  }
+
+  // Align based on format
+  const cls = f.align==='right'?'r':f.align==='center'?'c':'';
+  return{txt:s,cls};
+}
+
+// ── Render ────────────────────────────────────────────────────────
+function drawCell(td, r, c){
+  if(!td) return;
+  const id=cid(r,c);
+  if(spillO[id]) return;   // spill origin — managed by doSpill
+  const f=fmt[id]??{};
+  const{txt,cls}=fmtVal(id);
+  let dv=td.querySelector('.cdiv');
+  if(!dv){ dv=document.createElement('div'); dv.className='cdiv'; td.appendChild(dv); }
+  // class
+  let dcls='cdiv';
+  if(cls) dcls+=' '+cls;
+  if(f.align==='center') dcls='cdiv c';
+  else if(f.align==='right') dcls='cdiv r';
+  else if(cls==='r') dcls='cdiv r';
+  if(String(txt).startsWith('#')&&['#ERR','#CIR','#N/A','#VAL','#REF','#DIV','#NUM'].some(e=>txt.startsWith(e))) dcls+=' err';
+  dv.className=dcls;
+  dv.textContent=txt;
+  // font style
+  dv.style.cssText='';
+  if(f.bold)       dv.style.fontWeight='bold';
+  if(f.italic)     dv.style.fontStyle='italic';
+  if(f.underline)  dv.style.textDecoration=(f.strike?'underline line-through':'underline');
+  else if(f.strike) dv.style.textDecoration='line-through';
+  if(f.fontFace)   dv.style.fontFamily=f.fontFace;
+  if(f.fontSize)   dv.style.fontSize=f.fontSize+'px';
+  if(f.color)      dv.style.color=f.color;
+  if(f.indent)     dv.style.paddingLeft=(f.indent*12)+'px';
+  td.style.background=f.bg||'';
+  td.style.height=rh(r)+'px';
+}
+
+function drawAll(){ if(!tbl) return; tbl.querySelectorAll('td.cell').forEach(td=>drawCell(td,+td.dataset.r,+td.dataset.c)); }
+
+// ── Build table ──────────────────────────────────────────────────
+function buildTbl(){
+  const t=document.createElement('table');
+  // header
+  const thead=document.createElement('thead');
+  const hr=document.createElement('tr');
+  const co=document.createElement('th'); co.className='ch-corner'; hr.appendChild(co);
+  for(let c=0;c<numC;c++){
+    const th=document.createElement('th'); th.className='ch-col'; th.dataset.c=c;
+    th.style.width=th.style.minWidth=cw(c)+'px';
+    th.textContent=colName(c);
+    // resize handle
+    const rz=document.createElement('div');
+    rz.style.cssText='position:absolute;right:0;top:0;width:4px;height:100%;cursor:col-resize;z-index:6;';
+    rz.addEventListener('mousedown',ev=>startColResize(ev,c,th));
+    th.style.position='relative';
+    th.appendChild(rz);
+    th.addEventListener('click',ev=>{ if(ev.target===rz)return; if(editing)commitEdit(); sR=0;sC=c;sR2=numR-1;sC2=c; refreshSel(); });
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr); t.appendChild(thead);
+  // body
+  const tbody=document.createElement('tbody');
+  for(let r=0;r<numR;r++){
+    const tr=document.createElement('tr'); tr.style.height=rh(r)+'px';
+    const rh_el=document.createElement('td'); rh_el.className='rh'; rh_el.textContent=r+1; rh_el.dataset.r=r;
+    rh_el.addEventListener('click',()=>{ if(editing)commitEdit(); sR=r;sC=0;sR2=r;sC2=numC-1; refreshSel(); });
+    tr.appendChild(rh_el);
+    for(let c=0;c<numC;c++){
+      const td=document.createElement('td'); td.className='cell'; td.dataset.r=r; td.dataset.c=c;
+      td.style.width=td.style.minWidth=cw(c)+'px';
+      const dv=document.createElement('div'); dv.className='cdiv'; td.appendChild(dv);
+      drawCell(td,r,c);
+      attachCell(td,r,c);
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  t.appendChild(tbody);
+  return t;
+}
+
+function rebuildTbl(){
+  const g=grid(); const st=g.scrollTop,sl=g.scrollLeft;
+  tbl=buildTbl(); g.innerHTML=''; g.appendChild(tbl);
+  g.scrollTop=st; g.scrollLeft=sl;
+  // re-spill
+  Object.keys(spillO).forEach(id=>{ const p=pref(id); if(p&&cells[id]?.startsWith('=')) tryNFL(cells[id].slice(1).trim(),p[0],p[1]); });
+  refreshSel();
+}
+
+// ── Cell interaction ─────────────────────────────────────────────
+let _mouseR=-1,_mouseC=-1;
+function attachCell(td,r,c){
+  td.addEventListener('mousedown',ev=>{
+    if(ev.button!==0) return;
+
+    // ── Formula-building mode ──
+    // Only intercept if we are editing AND the current typed value starts with =
+    if(editing && editEl && editEl.value.startsWith('=')) {
+      ev.preventDefault(); ev.stopPropagation();
+      _inCellClick = true;
+
+      // Track drag-select start
+      let refStart = cid(r, c);
+      let refEnd   = refStart;
+
+      const insertRef = (ref) => {
+        const inp = editEl;
+        const val = inp.value;
+        const pos = inp.selectionStart;
+        const before = val.slice(0, pos);
+        const after  = val.slice(pos);
+
+        // Strip a trailing cell ref or range before the cursor so re-clicking replaces it
+        const stripped = before.replace(/[A-Za-z]{1,3}\d{1,7}(:[A-Za-z]{1,3}\d{1,7})?$/, '');
+
+        // Count unmatched open parens in the full expression so far.
+        // If there are more '(' than ')' the cursor is inside a function call —
+        // we need to close those parens after the ref so the formula stays valid.
+        const sofar = stripped + ref;
+        const opens  = (sofar.match(/\(/g)||[]).length;
+        const closes = (sofar.match(/\)/g)||[]).length;
+        const missing = Math.max(0, opens - closes);
+        // Only auto-close if 'after' doesn't already have enough closing parens
+        const existingClose = (after.match(/\)/g)||[]).length;
+        const toAdd = Math.max(0, missing - existingClose);
+        const closing = ')'.repeat(toAdd);
+
+        const newVal = stripped + ref + closing + after;
+        inp.value = newVal;
+
+        // Place cursor right after the inserted ref (before the auto-added closing parens)
+        const newPos = stripped.length + ref.length;
+        inp.setSelectionRange(newPos, newPos);
+        inp.dispatchEvent(new Event('input'));
+        inp.focus();
+      };
+
+      insertRef(refStart);
+
+      // Support drag to build a range ref
+      let fmlHighlighted = [];
+      const clearFmlHL = () => { fmlHighlighted.forEach(el=>el.classList.remove('fml-hl')); fmlHighlighted=[]; };
+
+      // Highlight the starting cell immediately
+      const hlRange = (startId, endId) => {
+        clearFmlHL();
+        const p1=pref(startId), p2=pref(endId);
+        if(!p1||!p2) return;
+        const rA=Math.min(p1[0],p2[0]),rB=Math.max(p1[0],p2[0]);
+        const cA=Math.min(p1[1],p2[1]),cB=Math.max(p1[1],p2[1]);
+        for(let rr=rA;rr<=rB;rr++) for(let cc=cA;cc<=cB;cc++){
+          const td=getTd(rr,cc); if(td){td.classList.add('fml-hl');fmlHighlighted.push(td);}
+        }
+      };
+      hlRange(refStart, refStart);
+
+      const onMove = mv => {
+        const el = document.elementFromPoint(mv.clientX, mv.clientY)?.closest('td.cell');
+        if(!el) return;
+        refEnd = cid(+el.dataset.r, +el.dataset.c);
+        const rangeRef = refStart === refEnd ? refStart : refStart + ':' + refEnd;
+        insertRef(rangeRef);
+        hlRange(refStart, refEnd);
+      };
+      const onUp = () => {
+        clearFmlHL();
+        _inCellClick = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      return;
+    }
+
+    // Normal navigation
+    _inCellClick = true;
+    if(editing) { commitEdit(); }
+    _inCellClick = false;
+    _mouseR=r; _mouseC=c;
+    if(ev.shiftKey){ sR2=r;sC2=c; }
+    else { sR=r;sC=c;sR2=-1;sC2=-1; }
+    refreshSel(); grid().focus();
+    const onMove=mv=>{
+      const el=document.elementFromPoint(mv.clientX,mv.clientY)?.closest('td.cell');
+      if(el){ sR2=+el.dataset.r;sC2=+el.dataset.c; refreshSel(); }
+    };
+    const onUp=()=>{ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); };
+    document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+  });
+  td.addEventListener('dblclick',()=>startEdit(r,c));
+  td.addEventListener('contextmenu',ev=>{ ev.preventDefault(); if(editing)commitEdit(); sR=r;sC=c;sR2=-1;sC2=-1;refreshSel(); showCtx(ev.clientX,ev.clientY); });
+}
+
+// ── Selection ────────────────────────────────────────────────────
+function refreshSel(){
+  if(!tbl) return;
+  const _r1=r1(),_r2=r2(),_c1=c1(),_c2=c2();
+
+  // Remove any orphaned edit inputs (prevents ghost blue-border cells)
+  if(!editing) tbl.querySelectorAll('input.cedit').forEach(el=>el.remove());
+
+  // Clear old classes
+  tbl.querySelectorAll('.anchor,.sel-range').forEach(el=>{el.classList.remove('anchor','sel-range');});
+  tbl.querySelectorAll('.hl').forEach(el=>el.classList.remove('hl'));
+  tbl.querySelectorAll('.fh').forEach(el=>el.remove());
+
+  // Highlight col/row headers
+  for(let c=_c1;c<=_c2;c++){ const th=tbl.querySelector(`.ch-col[data-c="${c}"]`); if(th)th.classList.add('hl'); }
+  for(let r=_r1;r<=_r2;r++){ const rh=tbl.querySelector(`.rh[data-r="${r}"]`); if(rh)rh.classList.add('hl'); }
+
+  // Mark cells
+  for(let r=_r1;r<=_r2;r++) for(let c=_c1;c<=_c2;c++){
+    const td=getTd(r,c); if(!td) continue;
+    if(r===sR&&c===sC) td.classList.add('anchor');
+    else td.classList.add('sel-range');
+  }
+
+  // Fill handle on anchor
+  if(!editing){
+    const atd=getTd(sR,sC);
+    if(atd){ const fh=document.createElement('div'); fh.className='fh'; atd.appendChild(fh); attachFH(fh); }
+  }
+
+  scrollTo(sR,sC);
+
+  // Update formula bar & name box
+  const id=cid(sR,sC);
+  document.getElementById('namebox').value = sR2>=0?`${cid(_r1,_c1)}:${cid(_r2,_c2)}`:id;
+  document.getElementById('fbar-input').value = cells[id]??'';
+  document.getElementById('s-cell').textContent = id;
+
+  // Status bar stats
+  const ids=allSelIds();
+  const nums=ids.map(i=>{ const v=getCellVal(i); return typeof v==='number'?v:parseFloat(v); }).filter(v=>!isNaN(v));
+  document.getElementById('s-sum').textContent = nums.length>0?'Sum: '+nums.reduce((a,b)=>a+b,0).toLocaleString('en-US',{maximumFractionDigits:8}):'';
+  document.getElementById('s-avg').textContent = nums.length>1?'Avg: '+(nums.reduce((a,b)=>a+b,0)/nums.length).toLocaleString('en-US',{maximumFractionDigits:8}):'';
+  document.getElementById('s-cnt').textContent = nums.length>1?'Count: '+nums.length:'';
+
+  // Ribbon state sync
+  const f=fmt[id]??{};
+  document.getElementById('btn-bold').classList.toggle('on',!!f.bold);
+  document.getElementById('btn-it').classList.toggle('on',!!f.italic);
+  document.getElementById('btn-ul').classList.toggle('on',!!f.underline);
+  document.getElementById('sel-fmt').value=f.format||'gen';
+}
+
+function allSelIds(){ const ids=[],_r1=r1(),_r2=r2(),_c1=c1(),_c2=c2(); for(let r=_r1;r<=_r2;r++) for(let c=_c1;c<=_c2;c++) ids.push(cid(r,c)); return ids; }
+
+function scrollTo(r,c){
+  const g=grid(),td=getTd(r,c); if(!td) return;
+  const tr=td.getBoundingClientRect(),wr=g.getBoundingClientRect();
+  if(tr.bottom>wr.bottom) g.scrollTop+=tr.bottom-wr.bottom+4;
+  if(tr.top<wr.top+RH)    g.scrollTop-=wr.top+RH-tr.top+4;
+  if(tr.right>wr.right)   g.scrollLeft+=tr.right-wr.right+4;
+  if(tr.left<wr.left+RHW) g.scrollLeft-=wr.left+RHW-tr.left+4;
+}
+
+// ── Fill handle ──────────────────────────────────────────────────
+function attachFH(fh){
+  fh.addEventListener('mousedown',ev=>{
+    ev.stopPropagation(); ev.preventDefault();
+    // Capture the full selection at drag-start so multi-cell fill works too
+    const selR1=r1(),selC1=c1(),selR2=r2(),selC2=c2();
+    let lastSnapped = false;
+    const onMove=mv=>{
+      const el=document.elementFromPoint(mv.clientX,mv.clientY)?.closest('td.cell');
+      if(!el) return;
+      const toR=+el.dataset.r, toC=+el.dataset.c;
+      // Determine fill direction: down (toR > selR2) or right (toC > selC2)
+      const fillDown = toR > selR2;
+      const fillRight = toC > selC2 && !fillDown;
+      if(!fillDown && !fillRight) return;
+      if(!lastSnapped){ snap(); lastSnapped=true; }
+      if(fillDown){
+        for(let dr=1; dr<=toR-selR2; dr++){
+          for(let sc=selC1; sc<=selC2; sc++){
+            const srcId=cid(selR2,sc), dstId=cid(selR2+dr,sc);
+            const srcVal=cells[srcId]??'';
+            cells[dstId] = srcVal.startsWith('=') ? shiftFormula(srcVal,dr,0) : srcVal;
+            drawCell(getTd(selR2+dr,sc),selR2+dr,sc);
+          }
+        }
+      } else {
+        for(let dc=1; dc<=toC-selC2; dc++){
+          for(let sr=selR1; sr<=selR2; sr++){
+            const srcId=cid(sr,selC2), dstId=cid(sr,selC2+dc);
+            const srcVal=cells[srcId]??'';
+            cells[dstId] = srcVal.startsWith('=') ? shiftFormula(srcVal,0,dc) : srcVal;
+            drawCell(getTd(sr,selC2+dc),sr,selC2+dc);
+          }
+        }
+      }
+      markDirty(); qSave();
+    };
+    const onUp=()=>{ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); };
+    document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+  });
+}
+
+// ── Column resize ────────────────────────────────────────────────
+function startColResize(ev,ci,th){
+  ev.preventDefault(); ev.stopPropagation();
+  const x0=ev.clientX,w0=cw(ci);
+  document.body.style.cursor='col-resize';
+  const onMove=mv=>{
+    const w=Math.max(8,w0+mv.clientX-x0);
+    colW[ci]=w; th.style.width=th.style.minWidth=w+'px';
+    tbl?.querySelectorAll(`td.cell[data-c="${ci}"]`).forEach(td=>{td.style.width=td.style.minWidth=w+'px';});
+  };
+  const onUp=()=>{ document.body.style.cursor=''; document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); };
+  document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+}
+
+// ── Formula tooltip ─────────────────────────────────────────────
+// Definitions: name → { sig, args: [{name, desc}] }
+const FML_DEFS = {
+  'QTY':      { sig:'QTY(type, product)', args:[{name:'type',desc:'0 = Gallons  |  1 = Pounds'},{name:'product',desc:'Cell ref or product name'}] },
+  'PRODUCTS': { sig:'PRODUCTS()', args:[] },
+  'TANKS':    { sig:'TANKS()', args:[] },
+  'LOCATIONS':{ sig:'LOCATIONS()', args:[] },
+  'VENDORS':  { sig:'VENDORS()', args:[] },
+};
+
+function showFmlTip(inp){
+  const tip = document.getElementById('fml-tip');
+  const val = inp.value;
+  if(!val.startsWith('=')){tip.style.display='none';return;}
+
+  // Find which known function the cursor is currently inside
+  const body = val.slice(1);
+  const pos = inp.selectionStart - 1;
+  let depth=0, fnName=null, argIdx=0;
+  for(let i=pos;i>=0;i--){
+    const ch=body[i];
+    if(ch===')') depth++;
+    else if(ch==='('){
+      if(depth===0){
+        const before=body.slice(0,i).trimEnd();
+        const m=before.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+        if(m && FML_DEFS[m[1].toUpperCase()]){
+          fnName=m[1].toUpperCase();
+          let d2=0;
+          for(let j=i+1;j<=pos;j++){
+            if(body[j]==='(') d2++;
+            else if(body[j]===')') d2--;
+            else if(body[j]===',' && d2===0) argIdx++;
+          }
+        }
+        break;
+      } else depth--;
+    }
+  }
+
+  if(!fnName){tip.style.display='none';return;}
+  const def=FML_DEFS[fnName];
+
+  // Build HTML using array join to avoid literal newline issues
+  const lines=[];
+  lines.push('<b>'+def.sig+'</b>');
+  def.args.forEach((a,i)=>{
+    const cur=i===argIdx;
+    lines.push((cur?'<span class="tip-cur">\u25b8 ':'  ')+a.name+': '+a.desc+(cur?'</span>':''));
+  });
+  tip.innerHTML=lines.join('<br>');
+  tip.style.display='block';
+
+  // Position below the active cell
+  const td=getTd(sR,sC);
+  if(td){
+    const r=td.getBoundingClientRect();
+    tip.style.left=r.left+'px';
+    tip.style.top=(r.bottom+3)+'px';
+  }
+}
+function hideFmlTip(){ document.getElementById('fml-tip').style.display='none'; }
+
+// Known NStock function names that get auto-completed with '('
+const NFL_FN_NAMES = ['QTY','PRODUCTS','TANKS','LOCATIONS','VENDORS'];
+
+// ── Editing ──────────────────────────────────────────────────────
+function startEdit(r,c,initKey){
+  if(spillC[cid(r,c)]) return;
+  if(editing) commitEdit();
+  sR=r; sC=c; editing=true;
+  document.getElementById('s-mode').textContent='Edit';
+
+  const td=getTd(r,c); if(!td) return;
+  td.querySelectorAll('.fh').forEach(el=>el.remove());
+
+  const inp=document.createElement('input'); inp.className='cedit';
+  inp.value = initKey!==undefined ? initKey : (cells[cid(r,c)]??'');
+  td.appendChild(inp); editEl=inp; editTd=td;
+
+  inp.focus();
+  if(initKey===undefined) inp.setSelectionRange(inp.value.length,inp.value.length);
+
+  // Sync formula bar + show tooltip live
+  const syncBar = ()=>{
+    document.getElementById('fbar-input').value=inp.value;
+    showFmlTip(inp);
+  };
+  inp.addEventListener('input', syncBar);
+  syncBar();
+
+  // Autocomplete '(' when the user finishes typing a known NStock function name
+  inp.addEventListener('input', ()=>{
+    const v = inp.value;
+    if(!v.startsWith('=')) return;
+    const body = v.slice(1);
+    // Check if we just completed a known function name (no paren yet)
+    const m = body.match(/([A-Za-z]+)$/);
+    if(!m) return;
+    const upper = m[1].toUpperCase();
+    if(NFL_FN_NAMES.includes(upper)){
+      // Only auto-add '(' if the very next char isn't already '('
+      const after = v.slice(v.indexOf(upper) + upper.length);
+      if(!after.startsWith('(')){
+        inp.value = v + '(';
+        inp.setSelectionRange(inp.value.length, inp.value.length);
+        document.getElementById('fbar-input').value = inp.value;
+        showFmlTip(inp);
+      }
+    }
+  });
+
+  // Commit on blur — but NOT if the user just clicked another cell (formula-building)
+  inp.addEventListener('blur',()=>{
+    setTimeout(()=>{
+      if(editing && !_inCellClick){ hideFmlTip(); commitEdit(); }
+    },80);
+  });
+
+  inp.addEventListener('keydown',onEditKey);
+  inp.addEventListener('keyup',()=>showFmlTip(inp));
+  inp.addEventListener('click',()=>showFmlTip(inp));
+}
+
+function commitEdit(){
+  if(!editEl){ editing=false; return; }
+  const id=cid(sR,sC), val=editEl.value;
+  snap();
+  if(spillO[id]) clearSpill(id);
+  editing=false;
+  const inp=editEl; editEl=null; editTd=null;
+  inp.remove();
+  document.getElementById('s-mode').textContent='Ready';
+  hideFmlTip();
+
+  if(val==='') { delete cells[id]; }
+  else {
+    cells[id]=val;
+    if(val.startsWith('=')){
+      const nr=tryNFL(val.slice(1).trim(),sR,sC);
+      if(nr===null){ refreshSel(); markDirty(); qSave(); drawAll(); return; }
+    }
+  }
+  drawAll(); refreshSel(); markDirty(); qSave();
+  grid().focus();
+}
+
+function cancelEdit(){
+  if(!editEl){ editing=false; return; }
+  editing=false;
+  const inp=editEl; editEl=null; editTd=null;
+  inp.remove();
+  hideFmlTip();
+  document.getElementById('s-mode').textContent='Ready';
+  drawCell(getTd(sR,sC),sR,sC); refreshSel();
+}
+
+function onEditKey(ev){
+  if(ev.key==='Enter'&&!ev.shiftKey){
+    ev.preventDefault(); commitEdit(); move(1,0); grid().focus();
+  }
+  else if(ev.key==='Tab'){ ev.preventDefault(); commitEdit(); move(0,ev.shiftKey?-1:1); grid().focus(); }
+  else if(ev.key==='Escape'){ cancelEdit(); grid().focus(); }
+  else if(ev.key==='ArrowUp' && !editEl?.value.startsWith('=')){
+    ev.preventDefault(); commitEdit(); move(-1,0); grid().focus();
+  }
+  else if(ev.key==='ArrowDown' && !editEl?.value.startsWith('=')){
+    ev.preventDefault(); commitEdit(); move(1,0); grid().focus();
+  }
+  else if(ev.key==='ArrowLeft' && !editEl?.value.startsWith('=') && editEl?.selectionStart===0 && editEl?.selectionEnd===0){
+    ev.preventDefault(); commitEdit(); move(0,-1); grid().focus();
+  }
+  else if(ev.key==='ArrowRight' && !editEl?.value.startsWith('=') && editEl?.selectionStart===editEl?.value.length && editEl?.selectionEnd===editEl?.value.length){
+    ev.preventDefault(); commitEdit(); move(0,1); grid().focus();
+  }
+}
+
+function move(dr,dc){
+  sR=clamp(sR+dr,0,numR-1); sC=clamp(sC+dc,0,numC-1); sR2=-1;sC2=-1; refreshSel();
+}
+
+// ── Keyboard (grid) ──────────────────────────────────────────────
+grid().addEventListener('keydown',ev=>{
+  if(editing) return;  // editing handles its own keys above
+  const ctrl=ev.ctrlKey||ev.metaKey,sh=ev.shiftKey,k=ev.key;
+
+  // Ctrl shortcuts
+  if(ctrl){
+    if(k==='z'){ev.preventDefault();undo();return;}
+    if(k==='y'){ev.preventDefault();redo();return;}
+    if(k==='c'){ev.preventDefault();doCopy();return;}
+    if(k==='x'){ev.preventDefault();doCut();return;}
+    if(k==='v'){ev.preventDefault();doPaste();return;}
+    if(k==='b'){ev.preventDefault();togFmt('bold');return;}
+    if(k==='i'){ev.preventDefault();togFmt('italic');return;}
+    if(k==='u'){ev.preventDefault();togFmt('underline');return;}
+    if(k==='f'){ev.preventDefault();openFind();return;}
+    if(k==='a'){ev.preventDefault();sR=0;sC=0;sR2=numR-1;sC2=numC-1;refreshSel();return;}
+    if(k==='Home'){ev.preventDefault();sR=0;sC=0;sR2=-1;sC2=-1;refreshSel();return;}
+    if(k==='End'){
+      ev.preventDefault();
+      let mr=0,mc=0; Object.keys(cells).forEach(id=>{const p=pref(id);if(p){mr=Math.max(mr,p[0]);mc=Math.max(mc,p[1]);}});
+      sR=mr;sC=mc;sR2=-1;sC2=-1;refreshSel(); return;
+    }
+  }
+
+  // Shift+arrow = extend selection
+  if(sh&&k==='ArrowUp')   {ev.preventDefault();if(sR2<0)sR2=sR;sR2=clamp(sR2-1,0,numR-1);if(sC2<0)sC2=sC;refreshSel();return;}
+  if(sh&&k==='ArrowDown') {ev.preventDefault();if(sR2<0)sR2=sR;sR2=clamp(sR2+1,0,numR-1);if(sC2<0)sC2=sC;refreshSel();return;}
+  if(sh&&k==='ArrowLeft') {ev.preventDefault();if(sC2<0)sC2=sC;sC2=clamp(sC2-1,0,numC-1);if(sR2<0)sR2=sR;refreshSel();return;}
+  if(sh&&k==='ArrowRight'){ev.preventDefault();if(sC2<0)sC2=sC;sC2=clamp(sC2+1,0,numC-1);if(sR2<0)sR2=sR;refreshSel();return;}
+  if(sh&&k==='Tab'){ev.preventDefault();move(0,-1);return;}
+
+  // Navigation
+  if(k==='ArrowUp')    {ev.preventDefault();move(-1,0);return;}
+  if(k==='ArrowDown')  {ev.preventDefault();move(1,0);return;}
+  if(k==='ArrowLeft')  {ev.preventDefault();move(0,-1);return;}
+  if(k==='ArrowRight') {ev.preventDefault();move(0,1);return;}
+  if(k==='Tab')        {ev.preventDefault();move(0,sh?-1:1);return;}
+  if(k==='Enter')      {ev.preventDefault();move(1,0);return;}
+  if(k==='F2')         {startEdit(sR,sC);return;}
+  if(k==='Home')       {ev.preventDefault();sC=0;sR2=-1;sC2=-1;refreshSel();return;}
+  if(k==='End')        {ev.preventDefault();sC=numC-1;sR2=-1;sC2=-1;refreshSel();return;}
+  if(k==='PageDown')   {ev.preventDefault();sR=clamp(sR+Math.floor(grid().clientHeight/RH),0,numR-1);sR2=-1;sC2=-1;refreshSel();return;}
+  if(k==='PageUp')     {ev.preventDefault();sR=clamp(sR-Math.floor(grid().clientHeight/RH),0,numR-1);sR2=-1;sC2=-1;refreshSel();return;}
+  if(k==='Delete'||k==='Backspace'){ev.preventDefault();delContents();return;}
+  if(k==='Escape')     {sR2=-1;sC2=-1;copyBuf=null;tbl?.querySelectorAll('.copying').forEach(el=>el.classList.remove('copying'));refreshSel();return;}
+
+  // Start typing = open edit with that character
+  if(k.length===1&&!ctrl&&!ev.altKey){ev.preventDefault();startEdit(sR,sC,k);return;}
+});
+
+function delContents(){
+  snap();
+  getAllSel().forEach(id=>{
+    if(spillO[id]){ clearSpill(id); }           // deleting an origin clears the whole array
+    else if(spillC[id]){ clearSpill(spillC[id]); } // deleting a child clears the whole array too
+    else { delete cells[id]; }
+  });
+  drawAll(); refreshSel(); markDirty(); qSave();
+}
+function getAllSel(){ return allSelIds(); }
+
+
+// ── Relative formula shifting ─────────────────────────────────────
+// Adjusts A1-style cell refs in a formula by (dr, dc) rows/cols.
+// Refs prefixed with $ are treated as absolute and left unchanged.
+// e.g. shiftFormula("=QTY(0,A2)+B1", 1, 0) → "=QTY(0,A3)+B2"
+function shiftFormula(formula, dr, dc){
+  if(!formula.startsWith('=')) return formula;
+  // Match cell refs like A1, $A1, A$1, $A$1 — including multi-letter cols
+  return '=' + formula.slice(1).replace(
+    /(\$?)([A-Za-z]{1,3})(\$?)(\d{1,7})/g,
+    (_, dc1, col, dr1, row) => {
+      const absCol = dc1==='$';
+      const absRow = dr1==='$';
+      let c = 0;
+      for(const ch of col.toUpperCase()) c = c*26 + (ch.charCodeAt(0)-64);
+      c -= 1; // 0-indexed
+      let r = parseInt(row) - 1; // 0-indexed
+      if(!absCol) c += dc;
+      if(!absRow) r += dr;
+      // Clamp to valid range
+      if(c < 0 || r < 0) return _; // out of bounds — leave unchanged
+      return (absCol?'$':'') + colName(c) + (absRow?'$':'') + (r+1);
+    }
+  );
+}
+
+// ── Copy / Cut / Paste ───────────────────────────────────────────
+function doCopy(){
+  copyBuf={r1:r1(),c1:c1(),r2:r2(),c2:c2(),
+    data:JSON.parse(JSON.stringify(cells)),
+    fmts:JSON.parse(JSON.stringify(fmt))};
+  cutMode=false;
+  tbl?.querySelectorAll('.copying').forEach(el=>el.classList.remove('copying'));
+  for(let r=r1();r<=r2();r++) for(let c=c1();c<=c2();c++) getTd(r,c)?.classList.add('copying');
+  // System clipboard
+  const rows=[];
+  for(let r=r1();r<=r2();r++){const row=[];for(let c=c1();c<=c2();c++) row.push(String(getCellVal(cid(r,c))??''));rows.push(row);}
+  navigator.clipboard?.writeText(rows.map(r=>r.join('\t')).join('\n')).catch(()=>{});
+  document.getElementById('s-mode').textContent='Copy';
+}
+function doCut(){ doCopy(); cutMode=true; document.getElementById('s-mode').textContent='Cut'; }
+function doPaste(){
+  if(!copyBuf) return; snap();
+  const{r1:sr1,c1:sc1,r2:sr2,c2:sc2,data,fmts}=copyBuf;
+  const pasteR=sR, pasteC=sC;
+  for(let dr=0;dr<=sr2-sr1;dr++) for(let dc=0;dc<=sc2-sc1;dc++){
+    const from=cid(sr1+dr,sc1+dc), to=cid(pasteR+dr,pasteC+dc);
+    if(data[from]!=null){
+      const v=data[from];
+      // Shift relative refs unless this is a cut (move keeps refs intact)
+      cells[to] = (!cutMode && v.startsWith('='))
+        ? shiftFormula(v, pasteR-sr1, pasteC-sc1)
+        : v;
+    } else delete cells[to];
+    if(fmts[from]) fmt[to]={...fmts[from]}; else delete fmt[to];
+  }
+  if(cutMode){ for(let r=sr1;r<=sr2;r++) for(let c=sc1;c<=sc2;c++){delete cells[cid(r,c)];delete fmt[cid(r,c)];} copyBuf=null;cutMode=false; }
+  tbl?.querySelectorAll('.copying').forEach(el=>el.classList.remove('copying'));
+  drawAll(); refreshSel(); markDirty(); qSave();
+  document.getElementById('s-mode').textContent='Ready';
+}
+
+// ── Formatting ───────────────────────────────────────────────────
+function togFmt(key){ snap(); const ids=allSelIds(),on=!(fmt[ids[0]]&&fmt[ids[0]][key]); ids.forEach(id=>{if(!fmt[id])fmt[id]={};fmt[id][key]=on;}); drawAll();refreshSel();markDirty();qSave(); }
+function setF(key,val){ snap(); allSelIds().forEach(id=>{if(!fmt[id])fmt[id]={};fmt[id][key]=val;}); drawAll();refreshSel();markDirty();qSave(); }
+
+// Toolbar wiring
+document.getElementById('btn-undo').addEventListener('click',undo);
+document.getElementById('btn-redo').addEventListener('click',redo);
+document.getElementById('btn-cut').addEventListener('click',doCut);
+document.getElementById('btn-copy').addEventListener('click',doCopy);
+document.getElementById('btn-paste').addEventListener('click',doPaste);
+document.getElementById('btn-bold').addEventListener('click',()=>togFmt('bold'));
+document.getElementById('btn-it').addEventListener('click',()=>togFmt('italic'));
+document.getElementById('btn-ul').addEventListener('click',()=>togFmt('underline'));
+document.getElementById('btn-str').addEventListener('click',()=>togFmt('strike'));
+document.getElementById('btn-al').addEventListener('click',()=>setF('align','left'));
+document.getElementById('btn-ac').addEventListener('click',()=>setF('align','center'));
+document.getElementById('btn-ar').addEventListener('click',()=>setF('align','right'));
+document.getElementById('fill-clr').addEventListener('input',ev=>setF('bg',ev.target.value));
+document.getElementById('font-clr').addEventListener('input',ev=>setF('color',ev.target.value));
+document.getElementById('sel-fmt').addEventListener('change',ev=>setF('format',ev.target.value));
+document.getElementById('sel-font').addEventListener('change',ev=>setF('fontFace',ev.target.value));
+document.getElementById('sel-size').addEventListener('change',ev=>setF('fontSize',+ev.target.value));
+document.getElementById('btn-d-').addEventListener('click',()=>{ snap();allSelIds().forEach(id=>{if(!fmt[id])fmt[id]={};fmt[id].decimals=Math.max(0,(fmt[id].decimals??2)-1);}); drawAll();markDirty();qSave(); });
+document.getElementById('btn-d+').addEventListener('click',()=>{ snap();allSelIds().forEach(id=>{if(!fmt[id])fmt[id]={};fmt[id].decimals=(fmt[id].decimals??2)+1;}); drawAll();markDirty();qSave(); });
+document.getElementById('btn-clrA').addEventListener('click',()=>{ snap();allSelIds().forEach(id=>{delete cells[id];delete fmt[id];}); drawAll();markDirty();qSave(); });
+document.getElementById('btn-clrF').addEventListener('click',()=>{ snap();allSelIds().forEach(id=>delete fmt[id]); drawAll();markDirty();qSave(); });
+
+// AutoSum
+document.getElementById('btn-sum').addEventListener('click',()=>{
+  let top=sR-1; while(top>=0&&cells[cid(top,sC)]&&!isNaN(+cells[cid(top,sC)])) top--;
+  if(top<sR-1){ snap(); cells[cid(sR,sC)]=`=SUM(${cid(top+1,sC)}:${cid(sR-1,sC)})`; drawAll();markDirty();qSave(); }
+});
+
+// Sort
+function doSort(asc){
+  if(sR2<0) return; snap();
+  const _r1=r1(),_r2=r2(),_c1=c1(),_c2=c2();
+  const rows=[];
+  for(let r=_r1;r<=_r2;r++){
+    const row={}; for(let c=_c1;c<=_c2;c++) row[c]={v:cells[cid(r,c)],f:fmt[cid(r,c)]};
+    rows.push(row);
+  }
+  rows.sort((a,b)=>{
+    const va=a[_c1]?.v??'',vb=b[_c1]?.v??'';
+    const na=+va,nb=+vb;
+    if(!isNaN(na)&&!isNaN(nb)) return asc?na-nb:nb-na;
+    return asc?String(va).localeCompare(String(vb)):String(vb).localeCompare(String(va));
+  });
+  rows.forEach((row,dr)=>{
+    for(let c=_c1;c<=_c2;c++){
+      const id=cid(_r1+dr,c);
+      if(row[c]?.v!=null) cells[id]=row[c].v; else delete cells[id];
+      if(row[c]?.f) fmt[id]={...row[c].f}; else delete fmt[id];
+    }
+  });
+  drawAll(); markDirty(); qSave();
+}
+document.getElementById('btn-az').addEventListener('click',()=>doSort(true));
+document.getElementById('btn-za').addEventListener('click',()=>doSort(false));
+
+// Row/Col operations
+function shiftCells(fn){ snap(); const newC={},newF={}; Object.entries(cells).forEach(([id,v])=>{const p=pref(id);if(p){const np=fn(p);if(np){newC[cid(...np)]=v;}}else newC[id]=v;}); Object.entries(fmt).forEach(([id,v])=>{const p=pref(id);if(p){const np=fn(p);if(np){newF[cid(...np)]=v;}}else newF[id]=v;}); cells=newC;fmt=newF; }
+document.getElementById('btn-ir').addEventListener('click',()=>{ shiftCells(([r,c])=>r>=sR?[r+1,c]:[r,c]); numR++; rebuildTbl(); markDirty(); qSave(); });
+document.getElementById('btn-dr').addEventListener('click',()=>{ if(numR<=2)return; shiftCells(([r,c])=>r===sR?null:r>sR?[r-1,c]:[r,c]); numR=Math.max(2,numR-1); rebuildTbl(); markDirty(); qSave(); });
+document.getElementById('btn-ic').addEventListener('click',()=>{ shiftCells(([r,c])=>c>=sC?[r,c+1]:[r,c]); numC++; rebuildTbl(); markDirty(); qSave(); });
+document.getElementById('btn-dc').addEventListener('click',()=>{ if(numC<=2)return; shiftCells(([r,c])=>c===sC?null:c>sC?[r,c-1]:[r,c]); numC=Math.max(2,numC-1); rebuildTbl(); markDirty(); qSave(); });
+
+// ── Formula bar ──────────────────────────────────────────────────
+document.getElementById('fbar-input').addEventListener('keydown',ev=>{
+  if(ev.key==='Enter'){
+    const id=cid(sR,sC),val=ev.target.value.trim(); snap();
+    if(spillO[id]) clearSpill(id);
+    if(val==='') delete cells[id];
+    else{
+      cells[id]=val;
+      if(val.startsWith('=')){const nr=tryNFL(val.slice(1).trim(),sR,sC);if(nr===null){markDirty();qSave();ev.target.blur();drawAll();return;}}
+    }
+    drawAll(); refreshSel(); markDirty(); qSave(); ev.target.blur(); grid().focus();
+  }
+  if(ev.key==='Escape'){ev.target.value=cells[cid(sR,sC)]??'';ev.target.blur();grid().focus();}
+});
+// Clicking formula bar while in cell edit mode commits the edit first
+document.getElementById('fbar-input').addEventListener('focus',()=>{ if(editing) commitEdit(); });
+
+// ── Name box ─────────────────────────────────────────────────────
+document.getElementById('namebox').addEventListener('keydown',ev=>{
+  if(ev.key!=='Enter') return;
+  const ref=ev.target.value.trim().toUpperCase();
+  if(ref.includes(':')){
+    const [a,b]=ref.split(':'),p1=pref(a),p2=pref(b);
+    if(p1&&p2){sR=p1[0];sC=p1[1];sR2=p2[0];sC2=p2[1];refreshSel();}
+  } else {
+    const p=pref(ref); if(p){sR=clamp(p[0],0,numR-1);sC=clamp(p[1],0,numC-1);sR2=-1;sC2=-1;refreshSel();}
+  }
+  ev.preventDefault(); grid().focus();
+});
+
+// ── Context menu ─────────────────────────────────────────────────
+function showCtx(x,y){ const m=document.getElementById('ctxmenu'); m.style.display='block';m.style.left=x+'px';m.style.top=y+'px'; }
+document.getElementById('ctxmenu').addEventListener('click',ev=>{
+  const a=ev.target.dataset.a; if(!a) return;
+  document.getElementById('ctxmenu').style.display='none';
+  if(a==='cut') doCut();
+  else if(a==='copy') doCopy();
+  else if(a==='paste') doPaste();
+  else if(a==='ir') document.getElementById('btn-ir').click();
+  else if(a==='ic') document.getElementById('btn-ic').click();
+  else if(a==='dr') document.getElementById('btn-dr').click();
+  else if(a==='dc') document.getElementById('btn-dc').click();
+  else if(a==='clrA'){ snap();allSelIds().forEach(id=>{delete cells[id];delete fmt[id];});drawAll();markDirty();qSave(); }
+  else if(a==='clrF'){ snap();allSelIds().forEach(id=>delete fmt[id]);drawAll();markDirty();qSave(); }
+});
+document.addEventListener('click',ev=>{ if(!ev.target.closest('#ctxmenu')&&!ev.target.closest('td.cell')) document.getElementById('ctxmenu').style.display='none'; });
+
+// ── Find & Replace ───────────────────────────────────────────────
+let _findRes=[], _findIdx=0;
+function openFind(){ document.getElementById('finddlg').style.display='block'; document.getElementById('find-q').focus(); }
+function closeFindDlg(){ document.getElementById('finddlg').style.display='none'; grid().focus(); }
+function findNext(dir=1){
+  const q=document.getElementById('find-q').value; if(!q) return;
+  _findRes=Object.keys(cells).filter(id=>String(cells[id]).includes(q));
+  if(!_findRes.length){document.getElementById('find-status').textContent='Not found';return;}
+  _findIdx=(_findIdx+dir+_findRes.length)%_findRes.length;
+  const p=pref(_findRes[_findIdx]); if(p){sR=p[0];sC=p[1];sR2=-1;sC2=-1;refreshSel();}
+  document.getElementById('find-status').textContent=`${_findIdx+1} of ${_findRes.length}`;
+}
+function replaceOne(){
+  const q=document.getElementById('find-q').value,rep=document.getElementById('find-rep').value;
+  if(!q||!_findRes.length) return; snap();
+  const id=_findRes[_findIdx]; cells[id]=String(cells[id]).replace(q,rep);
+  const p=pref(id); if(p)drawCell(getTd(p[0],p[1]),p[0],p[1]); markDirty();qSave();
+}
+function replaceAll(){
+  const q=document.getElementById('find-q').value,rep=document.getElementById('find-rep').value; if(!q) return; snap();
+  let n=0; Object.keys(cells).forEach(id=>{if(String(cells[id]).includes(q)){cells[id]=String(cells[id]).split(q).join(rep);n++;const p=pref(id);if(p)drawCell(getTd(p[0],p[1]),p[0],p[1]);}});
+  document.getElementById('find-status').textContent=`Replaced ${n} cell(s)`; markDirty();qSave();
+}
+document.getElementById('btn-find').addEventListener('click',openFind);
+document.getElementById('find-q').addEventListener('keydown',ev=>{if(ev.key==='Enter')findNext(1);if(ev.key==='Escape')closeFindDlg();});
+
+// ── NFL Spill ─────────────────────────────────────────────────────
+async function loadNFL(silent=false){
+  try{
+    const r=await fetch('/api/data-context'); if(!r.ok) throw 0;
+    const fresh=await r.json();
+    // Only re-render if data actually changed — avoids flicker on every poll
+    const changed = JSON.stringify(fresh)!==JSON.stringify(NFL);
+    NFL=fresh; nflReady=true;
+    if(changed) replaySpills();
+  }catch(e){ if(!silent) console.warn('NFL load failed',e); }
+}
+
+// Auto-poll every 10 seconds so spill arrays stay live
+let _nflPoll=null;
+function startNFLPoll(){
+  stopNFLPoll();
+  _nflPoll=setInterval(()=>loadNFL(true),10000);
+}
+function stopNFLPoll(){ clearInterval(_nflPoll); }
+// Pause polling when tab is hidden, resume when visible
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){ loadNFL(true); startNFLPoll(); }
+  else stopNFLPoll();
+});
+function clearSpill(oid){
+  const m=spillO[oid]; if(!m)return;
+  const p=pref(oid); if(!p)return;
+  const[oR,oC]=p;
+  for(let dr=1;dr<m.rows;dr++){
+    const id=cid(oR+dr,oC);
+    delete spillC[id]; delete cells[id];
+    drawCell(getTd(oR+dr,oC),oR+dr,oC);
+  }
+  delete cells[oid];
+  delete spillO[oid];
+  const otd=getTd(oR,oC);
+  if(otd){ otd.innerHTML=''; const dv=document.createElement('div'); dv.className='cdiv'; otd.appendChild(dv); }
+}
+function replaySpills(){
+  // Re-run spill array formulas
+  Object.keys(spillO).forEach(id=>{const p=pref(id);if(p&&cells[id]?.startsWith('='))tryNFL(cells[id].slice(1).trim(),p[0],p[1]);});
+  // Re-render any cell containing a live NFL formula like =QTY() so it picks up fresh data
+  const NFL_CELL_RE=/^=(QTY)\s*\(/i;
+  Object.keys(cells).forEach(id=>{
+    if(NFL_CELL_RE.test((cells[id]||'').trim())&&!spillO[id]){
+      const p=pref(id); if(p) drawCell(getTd(p[0],p[1]),p[0],p[1]);
+    }
+  });
+  drawAll();
+}
+function doSpill(expr,oR,oC,vals){
+  if(!vals.length) return null;
+  const oid=cid(oR,oC); if(oR+vals.length>numR){numR=oR+vals.length+20;rebuildTbl();}
+  spillO[oid]={rows:vals.length,cols:1}; cells[oid]='='+expr;
+  vals.forEach((v,dr)=>{
+    const r=oR+dr,c=oC,id=cid(r,c),td=getTd(r,c);
+    if(!dr){
+      if(td){const inp=td.querySelector('input');if(inp)inp.remove();td.innerHTML='';const dv=document.createElement('div');dv.className='cdiv';dv.textContent=v??'';td.appendChild(dv);}
+    } else { cells[id]=v!=null?String(v):'';spillC[id]=oid;delete fmt[id];drawCell(getTd(r,c),r,c); }
+  });
+  return null;
+}
+function tryNFL(expr,oR,oC){
+  const up=expr.toUpperCase().trim();
+  if(!nflReady&&/^(PRODUCTS|TANKS|LOCATIONS|VENDORS)\(\)$/.test(up)) return '⟳ Loading…';
+  if(up==='PRODUCTS()')  return doSpill(expr,oR,oC,NFL.products.map(p=>p.name));
+  if(up==='TANKS()')     return doSpill(expr,oR,oC,NFL.tanks.map(t=>t.name));
+  if(up==='LOCATIONS()') return doSpill(expr,oR,oC,NFL.locations.map(l=>l.name));
+  if(up==='VENDORS()')   return doSpill(expr,oR,oC,NFL.vendors.map(v=>v.name));
+
+  // =QTY(mode, ref)  — mode 0=gallons, 1=pounds
+  // ref can be a cell reference like A2 or a quoted product name like "Acetone"
+  const qtyM = expr.match(/^QTY\s*\(\s*(0|1)\s*,\s*(.+?)\s*\)$/i);
+  if(qtyM){
+    if(!nflReady) return '⟳ Loading…';
+    const mode = parseInt(qtyM[1]);       // 0=gal, 1=lb
+    const refRaw = qtyM[2].trim();
+
+    // Resolve the product name — could be a cell ref (A2) or a literal string ("Product X")
+    let productName;
+    const cellP = pref(refRaw);
+    if(cellP){
+      // It's a cell reference — read whatever value is in that cell
+      // Strip surrounding quotes in case the cell value is a quoted string from a formula result
+      let cellVal = getCellVal(cid(cellP[0],cellP[1]));
+      if(cellVal == null) cellVal = '';
+      productName = String(cellVal).replace(/^["']|["']$/g,'').replace(/\u00a0/g,' ').trim();
+    } else {
+      // Strip surrounding quotes if present
+      productName = refRaw.replace(/^["']|["']$/g,'').replace(/\u00a0/g,' ').trim();
+    }
+
+    if(!productName) return '';
+
+    // Normalize both sides: collapse whitespace, lowercase for robust matching
+    const norm = s => s.replace(/\s+/g,' ').trim().toLowerCase();
+    const pNorm = norm(productName);
+    const prod = NFL.products.find(p=>norm(p.name)===pNorm);
+    if(!prod){
+      console.warn('[QTY tryNFL] No match. Looking for:', JSON.stringify(productName), '| Available:', NFL.products.map(p=>JSON.stringify(p.name)));
+      return '#N/A';
+    }
+
+    if(mode===0){
+      // Gallons
+      if(prod.qty_gal!=null) return prod.qty_gal;
+      if((prod.unit||'').toUpperCase()==='GAL') return prod.onhand;
+      return '#N/A'; // no gal data available (e.g. solid-only product with no weight)
+    } else {
+      // Pounds
+      if(prod.qty_lb!=null) return prod.qty_lb;
+      if((prod.unit||'').toUpperCase()==='LB') return prod.onhand;
+      return '#N/A'; // no lb data available (e.g. liquid with no weight entered)
+    }
+  }
+
+  return undefined;
+}
+document.getElementById('btn-nfl').addEventListener('click',()=>{
+  document.getElementById('btn-nfl').textContent='⟳…';
+  loadNFL().then(()=>{ document.getElementById('btn-nfl').textContent='↻ Data'; startNFLPoll(); });
+});
+
+// ── CSV Export ───────────────────────────────────────────────────
+document.getElementById('btn-csv').addEventListener('click',()=>{
+  let mr=0,mc=0; Object.keys(cells).forEach(id=>{const p=pref(id);if(p){mr=Math.max(mr,p[0]);mc=Math.max(mc,p[1]);}});
+  let csv='';
+  for(let r=0;r<=mr;r++){
+    const row=[];
+    for(let c=0;c<=mc;c++){const v=String(getCellVal(cid(r,c))??'');row.push(v.includes(',')||v.includes('"')?`"${v.replace(/"/g,'""')}"`:v);}
+    csv+=row.join(',')+'\r\n';
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=((curSheetName()||'nstock').replace(/[^\w\- ]+/g,'').trim()||'nstock')+'.csv'; a.click();
+});
+
+// ── Sheets ───────────────────────────────────────────────────────
+let sheets=[], curSheet=null, sheetLoading=false;
+const SHEET_KEY='nstock.lastSheet';
+function curSheetName(){ const s=sheets.find(x=>x.id===curSheet); return s?s.name:''; }
+function escHtml(t){ return String(t).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+async function loadSheetList(){
+  const r=await fetch('/api/sheets'); if(!r.ok) throw 0;
+  sheets=await r.json();
+  renderTabs();
+}
+function renderTabs(){
+  const list=document.getElementById('tab-list');
+  list.innerHTML=sheets.map(sh=>
+    `<div class="stab${sh.id===curSheet?' active':''}" data-id="${sh.id}" title="${escHtml(sh.name)}${sh.locked?' (locked)':''}">`+
+    `${sh.locked?'<span class="lk">🔒</span>':''}<span>${escHtml(sh.name)}</span></div>`).join('');
+}
+async function switchSheet(id){
+  if(id===curSheet||sheetLoading) return;
+  if(editing) commitEdit();
+  clearTimeout(_saveT);
+  if(dirty) await doSave();
+  curSheet=id;
+  try{ localStorage.setItem(SHEET_KEY,id); }catch(e){}
+  undoStack=[]; redoStack=[];
+  sR=0; sC=0; sR2=-1; sC2=-1;
+  renderTabs();
+  await doLoad();
+  grid().scrollTop=0; grid().scrollLeft=0;
+  grid().focus();
+}
+async function addSheet(){
+  const name=prompt('Name for the new sheet:', 'Sheet '+(sheets.length+1));
+  if(name===null) return;
+  const r=await fetch('/api/sheets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  const d=await r.json();
+  if(!r.ok){ alert(d.error||'Could not add sheet.'); return; }
+  sheets.push(d); renderTabs(); switchSheet(d.id);
+}
+async function renameSheet(id){
+  const sh=sheets.find(x=>x.id===id); if(!sh) return;
+  const name=prompt('Rename sheet:', sh.name);
+  if(name===null||name.trim()===sh.name) return;
+  const r=await fetch(`/api/sheets/${id}/rename`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  const d=await r.json();
+  if(!r.ok){ alert(d.error||'Could not rename sheet.'); return; }
+  sh.name=d.name; renderTabs();
+}
+async function deleteSheet(id){
+  const sh=sheets.find(x=>x.id===id); if(!sh) return;
+  if(!confirm(`Delete “${sh.name}”? This can't be undone from here.`)) return;
+  const r=await fetch(`/api/sheets/${id}/delete`,{method:'POST'});
+  const d=await r.json();
+  if(!r.ok){ alert(d.error||'Could not delete sheet.'); return; }
+  sheets=sheets.filter(x=>x.id!==id);
+  if(id===curSheet){ dirty=false; curSheet=null; await switchSheet(sheets[0].id); } else renderTabs();
+}
+
+let _tabMenuId=null;
+document.getElementById('tab-list').addEventListener('click',ev=>{
+  const t=ev.target.closest('.stab'); if(t) switchSheet(t.dataset.id);
+});
+document.getElementById('tab-list').addEventListener('dblclick',ev=>{
+  const t=ev.target.closest('.stab'); if(t) renameSheet(t.dataset.id);
+});
+document.getElementById('tab-list').addEventListener('contextmenu',ev=>{
+  const t=ev.target.closest('.stab'); if(!t) return;
+  ev.preventDefault(); _tabMenuId=t.dataset.id;
+  const m=document.getElementById('tabmenu'); m.style.display='block';
+  m.style.left=ev.clientX+'px'; m.style.top=(ev.clientY-m.offsetHeight)+'px';
+});
+document.getElementById('tabmenu').addEventListener('click',ev=>{
+  const a=ev.target.dataset.t; document.getElementById('tabmenu').style.display='none';
+  if(a==='rename') renameSheet(_tabMenuId);
+  if(a==='delete') deleteSheet(_tabMenuId);
+});
+document.addEventListener('click',ev=>{ if(!ev.target.closest('#tabmenu')) document.getElementById('tabmenu').style.display='none'; });
+document.getElementById('tab-add').addEventListener('click',addSheet);
+
+// ── Save / Load ──────────────────────────────────────────────────
+let _saveT=null;
+function qSave(){ clearTimeout(_saveT); _saveT=setTimeout(doSave,1200); }
+function sheetPayload(){ return JSON.stringify({cells,fmt,rows:numR,cols:numC,colWidths:colW,rowHeights:rowH}); }
+async function doSave(){
+  if(sheetLoading||!curSheet) return;
+  const sid=curSheet, body=sheetPayload();
+  try{
+    const r=await fetch('/api/spreadsheet/save?sheet='+encodeURIComponent(sid),{method:'POST',headers:{'Content-Type':'application/json'},body});
+    if(!r.ok){ document.getElementById('save-lbl').textContent='Not saved (no access)'; return; }
+    if(sid===curSheet) markSaved();
+  }catch(e){console.warn('Save failed',e);}
+}
+async function doLoad(){
+  sheetLoading=true;
+  try{
+    const r=await fetch('/api/spreadsheet/load?sheet='+encodeURIComponent(curSheet)); if(!r.ok)throw 0;
+    const d=await r.json();
+    cells=d.cells??{}; fmt=d.fmt??{};
+    numR=Math.max(d.rows??200,200); numC=Math.max(d.cols??52,52);
+    colW=d.colWidths??{}; rowH=d.rowHeights??{};
+
+    // Rebuild spillO from any saved NFL formula cells, and wipe their stale
+    // spill-child values so replaySpills() re-fetches and re-renders cleanly.
+    const NFL_RE=/^=(PRODUCTS|TANKS|LOCATIONS|VENDORS)\(\s*\)$/i;
+    spillO={}; spillC={};
+    Object.keys(cells).forEach(id=>{
+      if(NFL_RE.test((cells[id]||'').trim())){
+        spillO[id]={rows:0,cols:1};
+      }
+    });
+    Object.keys(spillO).forEach(oid=>{
+      const p=pref(oid); if(!p) return;
+      const [oR,oC]=p;
+      for(let dr=1;dr<numR;dr++){
+        const sid=cid(oR+dr,oC);
+        if(!cells[sid]||cells[sid].startsWith('=')) break;
+        delete cells[sid];
+        spillC[sid]=oid;
+      }
+    });
+
+    sheetLoading=false;
+    rebuildTbl(); markSaved();
+  }catch{
+    cells={}; fmt={}; spillO={}; spillC={};
+    sheetLoading=false;
+    rebuildTbl();
+  }
+  sheetLoading=false;
+}
+async function bootSheets(){
+  try{ await loadSheetList(); }catch(e){ sheets=[]; }
+  if(!sheets.length){ rebuildTbl(); return; }
+  let last=null; try{ last=localStorage.getItem(SHEET_KEY); }catch(e){}
+  curSheet=(sheets.find(x=>x.id===last)||sheets[0]).id;
+  renderTabs();
+  await doLoad();
+}
+const _beacon=()=>{ if(dirty&&curSheet&&!sheetLoading) navigator.sendBeacon?.('/api/spreadsheet/save?sheet='+encodeURIComponent(curSheet),new Blob([sheetPayload()],{type:'application/json'})); };
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&dirty)doSave();});
+window.addEventListener('pagehide',_beacon);
+window.addEventListener('beforeunload',_beacon);
+
+// ── Auto-fit columns ─────────────────────────────────────────────
+function autoFit(){
+  const need=Math.ceil((grid().clientWidth-RHW)/CW)+4;
+  if(need>numC){numC=need;rebuildTbl();}
+}
+
+// ── Navbar height ────────────────────────────────────────────────
+(function(){const nav=document.querySelector('nav.navbar,nav,header');if(nav)document.documentElement.style.setProperty('--navbar-h',nav.getBoundingClientRect().height+'px');})();
+
+// ── Boot ─────────────────────────────────────────────────────────
+bootSheets().then(()=>{ autoFit(); loadNFL().then(startNFLPoll); });
+window.addEventListener('resize',autoFit);
+grid().focus();
+
+</script>
+{% endblock %}

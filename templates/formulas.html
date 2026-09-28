@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .fc-wrap { max-width: 1100px; margin: 0 auto; }
+  .fc-table th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: #64748b; font-weight: 700; }
+  .fc-table td { vertical-align: middle; }
+  .fc-row { cursor: pointer; }
+  .fc-menu-btn {
+    width: 34px; height: 32px; border: 1px solid transparent; background: transparent; border-radius: 6px;
+    display: inline-grid; place-items: center; color: #475569;
+  }
+  .fc-menu-btn:hover, .fc-menu-btn[aria-expanded="true"] { background: #f1f5f9; border-color: #e2e8f0; }
+  .fc-cost-unit { color: #64748b; font-size: .8rem; }
+</style>
+
+<div class="fc-wrap">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="section-title mb-0">Formula Catalog</h2>
+    <a href="{{ url_for('formulas_new_page') }}" class="btn btn-primary">+ Add</a>
+  </div>
+
+
+  <div class="card section-card shadow-sm">
+    {% if rows %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 fc-table">
+        <thead class="table-light">
+          <tr>
+            <th>Formula Name</th>
+            <th class="text-center" style="width:180px;">Component Count</th>
+{% if can('costs') %}<th class="text-end" style="width:180px;">Cost</th>{% endif %}
+            <th class="text-end" style="width:80px;">Menu</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          {% set f = r.formula %}
+          <tr class="fc-row" data-href="{{ url_for('formulas_info_page', formula_id=f.id) }}">
+            <td class="fw-semibold">
+              <a href="{{ url_for('formulas_info_page', formula_id=f.id) }}" class="text-decoration-none">{{ f.name or "Untitled" }}</a>
+              {% if f.description %}<div class="small text-muted fw-normal">{{ f.description }}</div>{% endif %}
+            </td>
+            <td class="text-center">{{ r.component_count }}</td>
+            {% if can('costs') %}
+            <td class="text-end">
+              {% if r.cost is not none %}
+                ${{ '%.2f'|format(r.cost) }} <span class="fc-cost-unit">/ {{ r.unit|upper }}</span>
+              {% else %}
+                <span class="text-muted" title="A component is missing or has no weight set">—</span>
+              {% endif %}
+            </td>
+            {% endif %}
+            <td class="text-end">
+              <div class="dropdown">
+                <button class="fc-menu-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                        data-bs-popper-config='{"strategy":"fixed"}'
+                        aria-label="Menu for {{ f.name }}">
+                  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2.5" y1="4" x2="13.5" y2="4"/><line x1="2.5" y1="8" x2="13.5" y2="8"/><line x1="2.5" y1="12" x2="13.5" y2="12"/></svg>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li><a class="dropdown-item" href="{{ url_for('formulas_info_page', formula_id=f.id) }}">Open / Edit</a></li>
+                  {% if can('blending') %}
+                  <li><a class="dropdown-item" href="{{ url_for('blend_new_page', formula=f.id) }}">Execute Blend</a></li>
+                  {% endif %}
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <form method="POST" action="{{ url_for('formulas_delete', formula_id=f.id) }}" class="m-0"
+                          data-msg="Delete the formula “{{ f.name }}”? This can't be undone."
+                          onsubmit="return confirm(this.dataset.msg);">
+                      <button type="submit" class="dropdown-item text-danger">Delete</button>
+                    </form>
+                  </li>
+                </ul>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted">
+      No formulas yet. Click <strong>+ Add</strong> to create your first one.
+    </div>
+    {% endif %}
+  </div>
+{% if can('costs') %}<div class="form-text mt-2">Cost is what it takes to make 1 unit using each component's current FIFO cost.</div>{% endif %}
+</div>
+
+<script>
+  // Click anywhere on a row to open the formula (except the menu)
+  document.querySelectorAll(".fc-row").forEach(function (row) {
+    row.addEventListener("click", function (e) {
+      if (e.target.closest(".dropdown, a, button, form")) return;
+      window.location = row.dataset.href;
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<h2 class="section-title" style="margin-top: -6px;">
+    New Product
+</h2>
+<p class="text-muted" style="margin-top:-4px;">
+  Set up the product here. Stock is added afterward with <strong>Receive</strong> on Adjust Inventory,
+  so every gallon comes in with its real cost and location.
+</p>
+
+{% if errors %}
+  <ul class="errors">
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+<div class="card section-card shadow-sm">
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('add_product') }}">
+
+      <!-- Row 1: Name, Phase -->
+      <div class="row-form">
+        <label for="name">Product Name *</label>
+        <input
+          id="name"
+          name="name"
+          type="text"
+          value="{{ form.get('name','') }}"
+          placeholder="e.g., Methanol"
+          required
+        >
+      </div>
+
+      <div class="mb-3">
+        <label for="description" class="form-label">Description</label>
+        <input
+          type="text"
+          class="form-control"
+          id="description"
+          name="description"
+          maxlength="500"
+          value="{{ form.description or '' }}"
+          placeholder="Short product description (optional)"
+        >
+      </div>
+
+      <div class="row-form">
+        <label for="phase">Form *</label>
+        {% set phase_val = form.get('phase','') %}
+        <select id="phase" name="phase" required>
+          <option value="" disabled {% if not phase_val %}selected{% endif %}>Select Form </option>
+          <option value="liquid" {% if phase_val == 'liquid' %}selected{% endif %}>Liquid</option>
+          <option value="solid"  {% if phase_val == 'solid'  %}selected{% endif %}>Solid</option>
+        </select>
+      </div>
+
+      <!-- Row 2: Default Unit, Unit Cost -->
+      <div class="row-form">
+        <label for="default_unit">Default Unit *</label>
+        {% set du_val = form.get('default_unit','gal') %}
+        <select id="default_unit" name="default_unit" required>
+          <option value="gal"  {% if du_val == 'gal'  %}selected{% endif %}>GAL</option>
+          <option value="lb"   {% if du_val == 'lb'   %}selected{% endif %}>LB</option>
+          <option value="unit" {% if du_val == 'unit' %}selected{% endif %}>UNIT</option>
+        </select>
+      </div>
+
+
+      
+      {% if can('costs') %}
+      <div class="row-form">
+        <label for="unit_cost">Unit Cost ($) *</label>
+        <input
+          id="unit_cost"
+          name="unit_cost"
+          type="number"
+          step="0.0001"
+          min="0"
+          value="{{ form.get('unit_cost','0') }}"
+          required
+        >
+      </div>
+      {% endif %}
+
+      <div class="row-form">
+        <label for="weight">Weight (LB/GAL)</label>
+        <input
+          id="weight"
+          name="weight"
+          type="number"
+          step="0.0001"
+          min="0"
+          value="{{ form.get('weight','') }}"
+          placeholder="Required for liquids in gal/lb"
+        >
+      </div>
+
+      <!-- Row 4: CAS, Supplier -->
+      <div class="row-form">
+        <label for="cas">CAS #</label>
+        <input
+          id="cas"
+          name="cas"
+          type="text"
+          value="{{ form.get('cas','') }}"
+          placeholder="e.g., 67-56-1"
+        >
+      </div>
+
+      <div class="row-form">
+        <label for="supplier">Supplier</label>
+        <input
+          id="supplier"
+          name="supplier"
+          type="text"
+          value="{{ form.get('supplier','') }}"
+          placeholder="e.g., Chevron, Local Distributor"
+        >
+      </div>
+
+      <!-- Row 5: Package info -->
+      <div class="row-form">
+        <label for="package_type">Package Type</label>
+        <input
+          id="package_type"
+          name="package_type"
+          type="text"
+          value="{{ form.get('package_type','') }}"
+          placeholder="e.g., Drum, Tote, Bag"
+        >
+      </div>
+
+      <div class="row-form">
+        <label for="package_size_gal">Package Size (GAL)</label>
+        <input
+          id="package_size_gal"
+          name="package_size_gal"
+          type="number"
+          step="0.0001"
+          min="0"
+          value="{{ form.get('package_size_gal','') }}"
+          placeholder="e.g., 55 for a 55-gal drum"
+        >
+      </div>
+
+      <!-- Row 6: Location, Notes -->
+      <div class="row-form">
+        <label for="location_id">Location</label>
+        {% set loc_val = form.get('location_id','') %}
+        <select id="location_id" name="location_id">
+          <option value="" {% if not loc_val %}selected{% endif %}>Select a location</option>
+
+          {% for loc in locations or [] %}
+            {% set loc_id = (loc.id if loc.id is defined else loc.get('id')) %}
+            {% set loc_name = (loc.name if loc.name is defined else loc.get('name')) %}
+            <option value="{{ loc_id }}" {% if loc_val|string == loc_id|string %}selected{% endif %}>
+              {{ loc_name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="row-form">
+        <label for="notes">Notes</label>
+        <textarea
+          id="notes"
+          name="notes"
+          placeholder="Any extra details: SDS link, handling, etc."
+        >{{ form.get('notes','') }}</textarea>
+      </div>
+
+      <!-- Actions -->
+      <div class="row-form" style="justify-content:flex-end; gap:8px;">
+        <a href="{{ url_for('list_products') }}" class="btn btn-outline-secondary btn-sm">
+          Cancel
+        </a>
+        <button class="btn btn-primary btn-sm" type="submit">
+          Save Product
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<div class="text-center text-muted mt-3">
+  <small>Add product • NStock</small>
+</div>
+
+{% endblock %}

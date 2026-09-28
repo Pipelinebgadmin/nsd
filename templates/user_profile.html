@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% block content %}
+{% set f = form %}
+{% macro err(name) %}{% if error and section == name %}<div class="alert alert-danger py-2">{{ error }}</div>{% endif %}{% endmacro %}
+{% macro eye(target) %}
+  <button type="button" class="pw-toggle" data-target="{{ target }}" aria-label="Show password" aria-pressed="false">
+    <svg class="eye-open" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+    <svg class="eye-closed" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+  </button>
+{% endmacro %}
+
+<style>
+  .profile-wrap { max-width: 900px; margin: 0 auto; }
+  .pw-field { position: relative; }
+  .pw-field .form-control { padding-right: 44px; }
+  .pw-toggle { position: absolute; top: 0; right: 0; height: 100%; width: 42px; display: grid; place-items: center;
+               border: 0; background: transparent; color: #64748b; cursor: pointer; }
+  .pw-toggle:hover { color: #0f172a; }
+  .pw-toggle .eye-closed { display: none; }
+  .pw-toggle[aria-pressed="true"] .eye-open { display: none; }
+  .pw-toggle[aria-pressed="true"] .eye-closed { display: block; }
+  .access-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px 20px; }
+  .access-item .form-text { margin-top: 0; }
+  .access-yes { color: #16a34a; font-weight: 700; }
+  .access-no { color: #cbd5e1; font-weight: 700; }
+</style>
+
+<div class="profile-wrap">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h4 class="mb-0">{{ user_display_name(user) }}</h4>
+      <div class="text-muted small">
+        @{{ user.username }} &middot; {{ user.role|capitalize }}
+        {% if not user.active %} &middot; <span class="badge bg-secondary">Inactive</span>{% endif %}
+      </div>
+    </div>
+    {% if is_admin %}
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_page') }}">Back to Admin</a>
+    {% endif %}
+  </div>
+
+  {% if error and section not in ("profile", "password", "account", "access") %}
+    <div class="alert alert-danger py-2">{{ error }}</div>
+  {% endif %}
+
+  <!-- ============ PERSONAL INFO ============ -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h6 class="mb-3">Personal Info</h6>
+      {{ err("profile") }}
+      <form method="POST" class="row g-3">
+        <input type="hidden" name="action" value="profile">
+        <div class="col-md-6">
+          <label class="form-label small mb-1">First name</label>
+          <input name="first_name" class="form-control" value="{{ f.get('first_name', user.first_name) }}" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Last name</label>
+          <input name="last_name" class="form-control" value="{{ f.get('last_name', user.last_name) }}" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Username</label>
+          <input name="username" class="form-control" value="{{ f.get('username', user.username) }}"
+                 autocomplete="off" autocapitalize="none" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Email</label>
+          <input name="email" type="email" class="form-control" value="{{ f.get('email', user.email) }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Phone number</label>
+          <input name="phone" type="tel" class="form-control" value="{{ f.get('phone', user.phone) }}">
+        </div>
+        <div class="col-12 text-end">
+          <button type="submit" class="btn btn-primary">Save Personal Info</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ PASSWORD ============ -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h6 class="mb-1">Password</h6>
+      <p class="text-muted small mb-3">
+        {% if is_self %}Enter your current password, then the new one.
+        {% else %}Set a new password for {{ user.first_name or user.username }}. Let them know what it is.{% endif %}
+      </p>
+      {{ err("password") }}
+      <form method="POST" class="row g-3">
+        <input type="hidden" name="action" value="password">
+        {% if is_self %}
+        <div class="col-md-4">
+          <label class="form-label small mb-1">Current password</label>
+          <div class="pw-field">
+            <input id="pw-current" name="current_password" type="password" class="form-control" autocomplete="current-password" required>
+            {{ eye("pw-current") }}
+          </div>
+        </div>
+        {% endif %}
+        <div class="col-md-4">
+          <label class="form-label small mb-1">New password</label>
+          <div class="pw-field">
+            <input id="pw-new" name="password" type="password" class="form-control" autocomplete="new-password" minlength="8" required>
+            {{ eye("pw-new") }}
+          </div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-1">Confirm new password</label>
+          <div class="pw-field">
+            <input id="pw-confirm" name="confirm" type="password" class="form-control" autocomplete="new-password" minlength="8" required>
+            {{ eye("pw-confirm") }}
+          </div>
+        </div>
+        <div class="col-12 d-flex justify-content-between align-items-center">
+          <span class="form-text">At least 8 characters.</span>
+          <button type="submit" class="btn btn-primary">Change Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ ROLE & STATUS ============ -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h6 class="mb-3">Role &amp; Status</h6>
+      {{ err("account") }}
+      {% if is_admin %}
+      <form method="POST" class="row g-3 align-items-end">
+        <input type="hidden" name="action" value="account">
+        <div class="col-md-4">
+          <label class="form-label small mb-1">Role</label>
+          <select name="role" class="form-select">
+            {% for r in roles %}<option value="{{ r }}" {% if user.role == r %}selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="activeSwitch" name="active" value="1"
+                   {% if user.active %}checked{% endif %}>
+            <label class="form-check-label" for="activeSwitch">Active (can log in)</label>
+          </div>
+        </div>
+        <div class="col-md-4 text-end">
+          <button type="submit" class="btn btn-primary">Save Role &amp; Status</button>
+        </div>
+      </form>
+      {% else %}
+      <div class="row">
+        <div class="col-md-4"><div class="small text-muted">Role</div><div>{{ user.role|capitalize }}</div></div>
+        <div class="col-md-4"><div class="small text-muted">Status</div><div>{{ "Active" if user.active else "Inactive" }}</div></div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ============ ACCESS ============ -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h6 class="mb-1">Access</h6>
+      {% if user.role == "admin" %}
+        <p class="text-muted mb-0">Admins have access to every feature and every location.</p>
+      {% else %}
+        <p class="text-muted small mb-3">
+          {% if is_admin %}Choose what {{ user.first_name or user.username }} can use.
+          {% else %}What you can use in NStock. Ask an admin if you need something changed.{% endif %}
+        </p>
+        {{ err("access") }}
+
+        {% if is_admin %}<form method="POST" id="accessForm">
+          <input type="hidden" name="action" value="access">{% endif %}
+
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="fw-semibold">Features</div>
+            {% if is_admin %}
+            <div class="small">
+              <a href="#" data-check="features" data-value="1">Select all</a> &middot;
+              <a href="#" data-check="features" data-value="0">Clear all</a>
+            </div>
+            {% endif %}
+          </div>
+          <div class="access-grid mb-4">
+            {% for key, label, desc in features %}
+            {% set has = key in user.features %}
+            <div class="access-item">
+              {% if is_admin %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="features" value="{{ key }}" id="feat-{{ key }}"
+                       {% if has %}checked{% endif %}>
+                <label class="form-check-label" for="feat-{{ key }}">{{ label }}</label>
+                <div class="form-text">{{ desc }}</div>
+              </div>
+              {% else %}
+              <div>
+                <span class="{{ 'access-yes' if has else 'access-no' }}">{{ "✓" if has else "✕" }}</span>
+                <span class="{{ '' if has else 'text-muted' }}">{{ label }}</span>
+                <div class="form-text ms-3">{{ desc }}</div>
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="fw-semibold mb-2">Locations</div>
+          {% set all_locs = user.locations == "all" %}
+          {% if is_admin %}
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="all_locations" value="1" id="allLocs"
+                     {% if all_locs %}checked{% endif %}>
+              <label class="form-check-label" for="allLocs">All locations (including new ones added later)</label>
+            </div>
+            <div class="access-grid mb-2" id="locList">
+              {% for loc in all_locations %}
+              <div class="form-check">
+                <input class="form-check-input loc-box" type="checkbox" name="locations" value="{{ loc.id }}" id="loc-{{ loc.id }}"
+                       {% if all_locs or loc.id in user.locations %}checked{% endif %}>
+                <label class="form-check-label" for="loc-{{ loc.id }}">{{ loc.name }}</label>
+              </div>
+              {% else %}
+              <div class="text-muted small">No locations set up yet.</div>
+              {% endfor %}
+            </div>
+            <div class="form-text mb-3">
+              This user can only open, pick, and make changes at the checked locations.
+              Company-wide totals (Dashboard, Inventory Overview, Reports) still include every location for now.
+            </div>
+            <div class="text-end">
+              <button type="submit" class="btn btn-primary">Save Access</button>
+            </div>
+          {% else %}
+            {% if all_locs %}
+              <div><span class="access-yes">✓</span> All locations</div>
+            {% else %}
+              {% for loc in all_locations if loc.id in user.locations %}
+                <div><span class="access-yes">✓</span> {{ loc.name }}</div>
+              {% else %}
+                <div class="text-muted">No locations assigned.</div>
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+
+        {% if is_admin %}</form>{% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ============ SHEETS ============ -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h6 class="mb-1">Sheets</h6>
+      {% if user.role == "admin" %}
+        <p class="text-muted mb-0">Admins can open every sheet.</p>
+      {% elif not can_spreadsheet %}
+        <p class="text-muted mb-0">
+          {{ user.first_name or user.username }} doesn't have the Spreadsheet feature, so no sheets are available.
+          {% if is_admin %}Turn on Spreadsheet under Access first.{% endif %}
+        </p>
+      {% else %}
+        <p class="text-muted small mb-3">
+          {% if is_admin %}Unlocked sheets are open to everyone. Use the switches to choose which locked sheets
+          {{ user.first_name or user.username }} can open.
+          {% else %}Sheets you can open. Ask an admin if you need access to another one.{% endif %}
+        </p>
+        {% if is_admin %}<form method="POST"><input type="hidden" name="action" value="sheets">{% endif %}
+        {% for sh in sheets %}
+          {% set open_to_all = not sh.locked %}
+          {% set has = open_to_all or user.id in sh.get('allowed_users', []) %}
+          {% if is_admin or has %}
+          <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+            <div>
+              <div class="fw-semibold">{% if sh.locked %}🔒 {% endif %}{{ sh.name }}</div>
+              <div class="small text-muted">{{ "Open to everyone" if open_to_all else "Locked" }}</div>
+            </div>
+            {% if is_admin %}
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input" type="checkbox" role="switch" name="sheets" value="{{ sh.id }}"
+                     aria-label="Access to {{ sh.name }}"
+                     {% if has %}checked{% endif %} {% if open_to_all %}disabled{% endif %}>
+            </div>
+            {% else %}
+            <span class="access-yes">✓</span>
+            {% endif %}
+          </div>
+          {% endif %}
+        {% else %}
+          <div class="text-muted small">No sheets yet.</div>
+        {% endfor %}
+        {% if is_admin %}
+          <div class="text-end mt-3"><button type="submit" class="btn btn-primary">Save Sheet Access</button></div>
+          </form>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Show / hide password while typing
+  document.querySelectorAll(".pw-toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      const input = document.getElementById(btn.dataset.target);
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.setAttribute("aria-pressed", show ? "true" : "false");
+      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      input.focus();
+    });
+  });
+
+  // Select all / clear all features
+  document.querySelectorAll("[data-check]").forEach(function (link) {
+    link.addEventListener("click", function (e) {
+      e.preventDefault();
+      const on = link.dataset.value === "1";
+      document.querySelectorAll('input[name="' + link.dataset.check + '"]').forEach(function (b) { b.checked = on; });
+    });
+  });
+
+  // "All locations" locks the individual boxes
+  const allLocs = document.getElementById("allLocs");
+  if (allLocs) {
+    const sync = function () {
+      document.querySelectorAll(".loc-box").forEach(function (b) {
+        b.disabled = allLocs.checked;
+        if (allLocs.checked) b.checked = true;
+      });
+    };
+    allLocs.addEventListener("change", sync);
+    sync();
+  }
+</script>
+{% endblock %}

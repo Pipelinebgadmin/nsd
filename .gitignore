@@ -1,0 +1,17 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Mac
+.DS_Store
+__MACOSX/
+._*
+
+# Secrets and local environment
+.env
+
+# Live company data: inventory, users, sheets, ledger, settings, secret key.
+# The app creates these on its own. Never commit this folder; back it up separately.
+data/

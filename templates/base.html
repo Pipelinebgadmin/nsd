@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <!-- Pages opened inside a window (iframe) never show their own header or menu,
+       even after navigating to another page inside that window. -->
+  <script>if (window.self !== window.top) document.documentElement.classList.add("in-frame");</script>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <script src="{{ url_for('static', filename='js/csrf.js') }}"></script>
+
+  <meta charset="utf-8" />
+  <title>{{ app_title or "NStock" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Bootstrap -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  >
+
+  <!-- NStock theme -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nstock.css') }}">
+
+  <!-- Floating window manager -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/windows.css') }}">
+
+  <style>
+    :root { --nstock-header-h: 52px; --nstock-sidebar-w: 250px; }
+    html.in-frame .nstock-header,
+    html.in-frame .nstock-sidebar,
+    html.in-frame .nstock-backdrop { display: none !important; }
+
+    /* ---- Header ---- */
+    .nstock-header {
+      position: sticky; top: 0; z-index: 2500;
+      height: var(--nstock-header-h);
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 16px 0 10px;
+      background: #fff; border-bottom: 1px solid #e2e8f0;
+    }
+    .nstock-brand { font-weight: 700; font-size: 1.15rem; color: #0f172a; text-decoration: none; }
+    .nstock-brand:hover { color: #0f172a; }
+    .nstock-menu-btn {
+      width: 38px; height: 38px; border: 0; background: transparent; border-radius: 8px;
+      display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; cursor: pointer;
+    }
+    .nstock-menu-btn span { display: block; width: 20px; height: 2px; background: #0f172a; border-radius: 2px; transition: transform .2s, opacity .2s; }
+    .nstock-menu-btn:hover { background: #f1f5f9; }
+    .nstock-menu-btn[aria-expanded="true"] span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+    .nstock-menu-btn[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+    .nstock-menu-btn[aria-expanded="true"] span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+    /* ---- Sidebar (slides in from the left) ---- */
+    .nstock-sidebar {
+      position: fixed; top: var(--nstock-header-h); left: 0; bottom: 0; z-index: 2450;
+      width: var(--nstock-sidebar-w); overflow-y: auto;
+      background: #fff; border-right: 1px solid #e2e8f0;
+      transform: translateX(-100%); transition: transform .2s ease;
+      padding: 10px 0;
+    }
+    .nstock-sidebar.open { transform: translateX(0); box-shadow: 8px 0 24px rgba(15, 23, 42, .08); }
+    .nstock-sidebar ul { list-style: none; margin: 0; padding: 0; }
+    .nstock-sidebar a {
+      display: block; padding: 10px 20px; color: #334155; text-decoration: none; font-weight: 500;
+      border-left: 3px solid transparent;
+    }
+    .nstock-sidebar a:hover { background: #f8fafc; color: #0f172a; }
+    .nstock-sidebar a.active { color: #0f172a; background: #f1f5f9; border-left-color: #2563eb; font-weight: 600; }
+    .nstock-sidebar-section {
+      margin: 14px 20px 4px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #94a3b8;
+    }
+    .nstock-backdrop {
+      position: fixed; top: var(--nstock-header-h); left: 0; right: 0; bottom: 0; z-index: 2400;
+      background: rgba(15, 23, 42, .25); opacity: 0; pointer-events: none; transition: opacity .2s;
+    }
+    .nstock-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    /* ---- Maximized-window controls in the header ---- */
+    .win-header-controls { display: flex; align-items: center; gap: 2px; padding: 3px 4px 3px 12px;
+      border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+    .win-header-controls[hidden] { display: none; }
+    .whc-title { font-size: .85rem; font-weight: 600; color: #334155; margin-right: 8px; max-width: 260px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .whc-btn { width: 30px; height: 28px; border: 0; background: transparent; border-radius: 6px; color: #475569;
+      font-size: 16px; line-height: 1; display: grid; place-items: center; cursor: pointer; }
+    .whc-btn:hover { background: #e2e8f0; color: #0f172a; }
+    .whc-close:hover { background: #ef4444; color: #fff; }
+    /* Kill all container width caps — force full-width */
+    .container,
+    .container-sm,
+    .container-md,
+    .container-lg,
+    .container-xl,
+    .container-xxl,
+    .container-fluid {
+      max-width: 100% !important;
+      width: 100% !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      padding-left: 1.25rem !important;
+      padding-right: 1.25rem !important;
+    }
+  </style>
+</head>
+
+<body>
+  {% set EMBED = request.args.get('embed') == '1' %}
+
+  {% if not EMBED %}
+  <!-- ================= HEADER ================= -->
+  <header class="nstock-header">
+    <button type="button" class="nstock-menu-btn" id="menuBtn"
+            aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+
+    <a href="{{ url_for('home') }}" class="nstock-brand">{{ app_title or "NStock" }}</a>
+
+    <div class="flex-grow-1"></div>
+
+    <!-- Controls for a maximized window appear here (QuickBooks style) -->
+    <div id="winHeaderControls" class="win-header-controls" hidden>
+      <span class="whc-title"></span>
+      <button type="button" class="whc-btn" data-act="min" title="Minimize" aria-label="Minimize window">&#8211;</button>
+      <button type="button" class="whc-btn" data-act="split" title="Split screen" aria-label="Split screen">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><line x1="8" y1="2.5" x2="8" y2="13.5"/></svg>
+      </button>
+      <button type="button" class="whc-btn whc-close" data-act="close" title="Close" aria-label="Close window">&times;</button>
+    </div>
+
+    {% if current_user %}
+    <div class="dropdown ms-3 flex-shrink-0">
+      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+              data-bs-toggle="dropdown" aria-expanded="false">
+        {{ current_user.username }}
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><a class="dropdown-item" href="{{ url_for('users_page') }}">My Profile</a></li>
+        {% if current_user.role == 'admin' %}
+          <li><a class="dropdown-item" href="{{ url_for('admin_page') }}">Admin</a></li>
+        {% endif %}
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <form method="POST" action="{{ url_for('logout') }}" class="m-0">
+            <button type="submit" class="dropdown-item">Log Out</button>
+          </form>
+        </li>
+      </ul>
+    </div>
+    {% endif %}
+  </header>
+
+  <!-- ================= SIDEBAR ================= -->
+  {% set nav_items = [
+    ('home', 'Home', None),
+    ('dashboard', 'Dashboard', 'dashboard'),
+    ('inventory_overview', 'Inventory Overview', 'inventory_view'),
+    ('spreadsheet_page', 'Spreadsheet', 'spreadsheet'),
+    ('inventory_adjust_page', 'Adjust Inventory', 'adjust_inventory'),
+    ('list_products', 'Products', 'products'),
+    ('alerts_page', 'Reorder Alerts', 'alerts'),
+    ('blend_new_page', 'Blend', ['blending', 'blend_builder']),
+    ('blend_log_page', 'Blend Log', ['blending', 'blend_builder']),
+    ('formulas_page', 'Formula Catalog', 'formulas'),
+    ('locations_page', 'Locations', 'locations'),
+  ] %}
+  <div class="nstock-backdrop" id="sidebarBackdrop"></div>
+  <nav class="nstock-sidebar" id="sidebar" aria-label="Main menu">
+    <ul>
+      {% for endpoint, label, feature in nav_items %}
+        {% if feature is none or can(feature) %}
+        <li>
+          <a href="{{ url_for(endpoint) }}" class="{% if request.endpoint == endpoint %}active{% endif %}">{{ label }}</a>
+        </li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+    {% if current_user and current_user.role == 'admin' %}
+    <div class="nstock-sidebar-section">Admin</div>
+    <ul>
+      <li><a href="{{ url_for('admin_page') }}" class="{% if request.endpoint == 'admin_page' %}active{% endif %}">Users &amp; Sheets</a></li>
+    </ul>
+    {% endif %}
+  </nav>
+  {% endif %}
+
+  <footer>
+    <div class="footer-inner">
+      <!-- your existing footer text/links -->
+    </div>
+  </footer>
+
+  <main class="container-fluid py-3">
+    {# Messages (errors, confirmations) show at the top of every page.
+       Showing them here first means pages that also list them won't repeat them. #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <div class="nstock-flashes">
+        {% for cat, msg in messages %}
+        <div class="alert alert-{{ 'danger' if cat == 'error' else (cat if cat in ['success','danger','warning','info'] else 'info') }} alert-dismissible fade show py-2" role="alert">
+          {{ msg }}
+          <button type="button" class="btn-close py-2" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Floating windows render here, on top of whatever page is behind them -->
+  <div id="windows-root"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='js/windows.js') }}"></script>
+  <script>
+    // Sidebar open / close
+    (function () {
+      const btn = document.getElementById("menuBtn");
+      const bar = document.getElementById("sidebar");
+      const back = document.getElementById("sidebarBackdrop");
+      if (!btn || !bar) return;
+      function setOpen(open) {
+        bar.classList.toggle("open", open);
+        back.classList.toggle("open", open);
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+        btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+      }
+      btn.addEventListener("click", function () { setOpen(!bar.classList.contains("open")); });
+      back.addEventListener("click", function () { setOpen(false); });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
+    })();
+  </script>
+  <script>
+    // Ctrl+L (Cmd+L on Mac) opens the hidden ledger page. Browsers normally
+    // reserve this shortcut for focusing the address bar; preventDefault
+    // stops that so the page can handle it instead. Not guaranteed to work
+    // in every browser/OS combo since some intercept it before JS ever sees it.
+    {% if can('ledger') %}
+    document.addEventListener("keydown", function (e) {
+      const key = (e.key || "").toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && key === "l") {
+        e.preventDefault();
+        window.location.href = "{{ url_for('event_ledger_page') }}";
+      }
+    });
+    {% endif %}
+  </script>
+</body>
+</html>

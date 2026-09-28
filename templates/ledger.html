@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if not authed %}
+<div class="d-flex justify-content-center align-items-center" style="min-height:70vh;">
+  <div class="card shadow-sm" style="width:100%; max-width:360px;">
+    <div class="card-body">
+      <h5 class="card-title mb-3">Event Ledger</h5>
+      {% if error %}
+        <div class="alert alert-danger py-2">{{ error }}</div>
+      {% endif %}
+      <form method="POST">
+        <input
+          type="password"
+          name="password"
+          class="form-control mb-3"
+          placeholder="Password"
+          autofocus
+          autocomplete="off"
+        >
+        <button type="submit" class="btn btn-primary w-100">Unlock</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Event Ledger</h4>
+  <div class="d-flex align-items-center gap-3">
+    {% if chain_status.ok %}
+      <span class="badge bg-success">Chain verified &middot; {{ chain_status.count }} entries</span>
+    {% else %}
+      <span class="badge bg-danger">
+        Chain broken at {{ chain_status.broken_at }} ({{ chain_status.reason }})
+      </span>
+    {% endif %}
+    <form method="POST" action="{{ url_for('event_ledger_lock') }}">
+      <button type="submit" class="btn btn-sm btn-outline-secondary">Lock</button>
+    </form>
+  </div>
+</div>
+
+{% if not entries %}
+  <div class="text-muted">No ledger entries yet.</div>
+{% else %}
+<div class="table-responsive">
+  <table class="table table-sm align-middle">
+    <thead>
+      <tr>
+        <th>Entry</th>
+        <th>Time</th>
+        <th>Event</th>
+        <th>Payload</th>
+        <th>Hash</th>
+        <th>Prev hash</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td class="text-nowrap">{{ e.entry_id }}</td>
+        <td class="text-nowrap">{{ e.timestamp }}</td>
+        <td><span class="badge bg-light text-dark border">{{ e.event_type }}</span></td>
+        <td style="max-width:520px;">
+          <pre class="mb-0" style="white-space:pre-wrap; font-size:12px;">{{ e.payload | tojson(indent=2) }}</pre>
+        </td>
+        <td class="text-nowrap" style="font-family:monospace; font-size:11px;">{{ e.entry_hash[:12] }}&hellip;</td>
+        <td class="text-nowrap" style="font-family:monospace; font-size:11px;">{{ e.prev_hash[:12] }}&hellip;</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+
+{% endblock %}

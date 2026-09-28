@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<div style="
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:-6px;
+  gap:12px;
+  flex-wrap:wrap;
+">
+  <h2 class="section-title" style="margin:0;">Locations</h2>
+
+  <div style="display:flex; gap:10px; align-items:center;">
+    <a href="{{ url_for('add_location') }}" class="btn btn-primary">+ Add Location</a>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Back</a>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Location</th>
+{% if can('costs') %}<th class="text-end">Total Value</th>{% endif %}
+          <th class="text-end">Total Gallons</th>
+          <th class="text-end">Total Pounds</th>
+          <th class="text-end"># of Products</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% if locations and locations|length > 0 %}
+          {% for loc in locations %}
+            {# loc might be a dict or an object; handle both safely #}
+            {% set name = (loc.get('location') if loc is mapping else loc.location) %}
+            {% if not name %}
+              {% set name = (loc.get('name') if loc is mapping else loc.name) %}
+            {% endif %}
+
+            {% set loc_id = (loc.get('location_id') if loc is mapping else loc.location_id) %}
+
+            {% set total_value   = (loc.get('total_value') if loc is mapping else loc.total_value) or 0 %}
+            {% set total_gallons = (loc.get('total_gallons') if loc is mapping else loc.total_gallons) or 0 %}
+            {% set total_pounds  = (loc.get('total_pounds') if loc is mapping else loc.total_pounds) or 0 %}
+            {% set sku_count     = (loc.get('sku_count') if loc is mapping else loc.sku_count) or 0 %}
+
+            <tr>
+              <td>
+                {% if loc_id %}
+                  <a href="{{ url_for('location_detail_by_id', location_id=loc_id) }}"
+                    style="font-weight:600; text-decoration:none;">
+                    {{ name }}
+                  </a>
+                  <div class="text-muted-small">ID: {{ loc_id }}</div>
+                {% else %}
+                  <a href="{{ url_for('location_detail_page', location_name=name) }}"
+                    style="font-weight:600; text-decoration:none;">
+                    {{ name }}
+                  </a>
+                  <div class="text-muted-small">ID: —</div>
+                {% endif %}
+              </td>
+
+{% if can('costs') %}<td class="text-end">${{ '%.2f'|format(total_value) }}</td>{% endif %}
+              <td class="text-end">{{ '%.2f'|format(total_gallons) }}</td>
+              <td class="text-end">{{ '%.2f'|format(total_pounds) }}</td>
+              <td class="text-end">{{ sku_count }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="5" class="text-center text-muted">
+              No location data yet. Add products and receive inventory with a location to populate this view.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

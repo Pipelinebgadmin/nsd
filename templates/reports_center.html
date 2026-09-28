@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .reports-wrap{max-width:1100px;margin:auto;padding:20px 0 40px 0;}
+  .reports-title{font-size:28px;font-weight:700;margin-bottom:6px;}
+  .reports-subtitle{color:#6b7280;font-size:14px;margin-bottom:28px;}
+  .report-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;}
+  .report-card{
+    background:#fff;border:1px solid #dbe3ea;border-radius:14px;padding:20px;
+    box-shadow:0 3px 10px rgba(0,0,0,.04); text-decoration:none; color:inherit;
+    display:flex;flex-direction:column;gap:6px;transition:.15s;
+  }
+  .report-card:hover{transform:translateY(-3px);box-shadow:0 8px 18px rgba(0,0,0,.08);border-color:#bfd3e6;}
+  .report-card .rc-title{font-weight:700;font-size:16px;}
+  .report-card .rc-desc{font-size:13px;color:#6b7280;}
+</style>
+
+<div class="reports-wrap">
+  <h1 class="reports-title">Report Center</h1>
+  <div class="reports-subtitle">Generate and print reports by location and date. Every report can be downloaded as a PDF.</div>
+
+  <div class="report-grid">
+
+    {% if can('costs') %}
+    <a class="report-card" href="{{ url_for('report_inventory_value') }}">
+      <div class="rc-title">Total Inventory Value</div>
+      <div class="rc-desc">On-hand value by location or company-wide, filterable by date range.</div>
+    </a>
+    {% endif %}
+
+    {% if can('costs') %}
+    <a class="report-card" href="{{ url_for('report_avg_cost') }}">
+      <div class="rc-title">Avg Cost of Goods</div>
+      <div class="rc-desc">Weighted average unit cost per product from its FIFO layers.</div>
+    </a>
+    {% endif %}
+
+    <a class="report-card" href="{{ url_for('report_inventory_listing') }}">
+      <div class="rc-title">Total Inventory Report</div>
+      <div class="rc-desc">Full on-hand listing by product and location.</div>
+    </a>
+
+    {% if can('costs') %}
+    <a class="report-card" href="{{ url_for('report_blend_cost') }}">
+      <div class="rc-title">Blend Cost (Current)</div>
+      <div class="rc-desc">Current cost per gallon for each formula, priced off today's component costs.</div>
+    </a>
+    {% endif %}
+
+    <a class="report-card" href="{{ url_for('report_blend_instruction') }}">
+      <div class="rc-title">Blend Instruction</div>
+      <div class="rc-desc">Printable component recipe for a formula.</div>
+    </a>
+
+    <a class="report-card" href="{{ url_for('report_cycle_count') }}">
+      <div class="rc-title">Inventory Cycle Count</div>
+      <div class="rc-desc">Randomized blank count sheet for a physical spot-check.</div>
+    </a>
+
+  </div>
+</div>
+
+{% endblock %}

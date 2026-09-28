@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <script src="{{ url_for('static', filename='js/csrf.js') }}"></script>
+
+<meta charset="utf-8" />
+<title>{{ app_title }} — {{ p.name }}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<style>
+:root{
+  --bg:#f4f6f8;
+  --card:#ffffff;
+  --text:#0f172a;
+  --muted:#64748b;
+  --line:#d6dde6;
+  --accent:#1d4ed8;
+  --danger:#dc2626;
+}
+
+body{
+  margin:0;
+  font-family: Arial, Helvetica, sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+
+/* Wider working area */
+.wrap{
+  max-width:1500px;
+  margin:18px auto;
+  padding:0 28px;
+}
+
+/* Header: NOT boxed, just clean divider */
+.page-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:16px;
+  padding-bottom:12px;
+  border-bottom:1px solid var(--line);
+  margin-bottom:16px;
+}
+
+h1{
+  margin:0;
+  font-size:24px;
+  font-weight:700;
+
+  /* No wrap + ellipsis if long */
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+
+  /* ensures ellipsis works even in flex */
+  max-width: 900px;
+}
+
+.muted{
+  color:var(--muted);
+  font-size:14px;
+
+  /* keep ID line clean */
+  white-space:nowrap;
+}
+
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:0;
+  padding:18px;
+}
+
+/* Form grid */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:16px;
+}
+
+/* Labels behave like headers */
+label{
+  display:block;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.2px;
+  margin-bottom:6px;
+  text-align:center;
+  color:#334155;
+}
+
+input,
+select,
+textarea{
+  width:100%;
+  padding:10px 10px;
+  border:1px solid var(--line);
+  border-radius:0;
+  background:#fff;
+  font:inherit;
+
+  /* Center values under label */
+  text-align:center;
+
+  /* prevent wrapping / weird line breaks */
+  white-space:nowrap;
+}
+
+textarea{
+  min-height:96px;
+  resize:vertical;
+
+  /* Notes should read naturally */
+  text-align:left;
+  white-space:normal;
+}
+
+input:focus,
+select:focus,
+textarea:focus{
+  outline:none;
+  border-color:var(--accent);
+}
+
+/* Buttons: square */
+.btn{
+  border:1px solid var(--line);
+  background:#fff;
+  padding:10px 16px;
+  border-radius:0;
+  cursor:pointer;
+  font-weight:700;
+  line-height:1;
+}
+
+.btn.primary{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+
+.btn.danger{
+  background:var(--danger);
+  border-color:var(--danger);
+  color:#fff;
+}
+
+.btn:hover{
+  opacity:.96;
+}
+
+/* Alerts: square */
+.flash{
+  padding:10px;
+  border:1px solid #fecdd3;
+  background:#fff1f2;
+  color:#9f1239;
+  margin:12px 0;
+  border-radius:0;
+}
+
+.mono{
+  font-family:Consolas, Menlo, monospace;
+}
+
+/* Responsive: drop to 2 columns, then 1 */
+@media (max-width: 980px){
+  .grid{ grid-template-columns:1fr 1fr; }
+  h1{ max-width: 520px; }
+}
+@media (max-width: 640px){
+  .grid{ grid-template-columns:1fr; }
+  h1{ max-width: 100%; }
+}
+
+/* Kill all container width caps — force full-width */
+.container,
+.container-sm,
+.container-md,
+.container-lg,
+.container-xl,
+.container-xxl,
+.container-fluid {
+  max-width: 100% !important;
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding-left: 1.25rem !important;
+  padding-right: 1.25rem !important;
+}
+</style>
+</head>
+
+<body>
+
+<div class="wrap">
+
+  <!-- HEADER (no box) -->
+  <div class="page-header">
+    <div style="min-width:0;">
+      <h1 title="{{ p.name }}">{{ p.name }}</h1>
+      <div class="muted">ID: <span class="mono">{{ p.id }}</span></div>
+    </div>
+
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start;">
+      <a class="btn" href="{{ url_for('list_products') }}">Back</a>
+
+      <form method="post"
+            action="{{ url_for('product_detail', product_id=p.id) }}"
+            onsubmit="return confirm('Delete {{ p.name }}?');"
+            style="margin:0;">
+        <input type="hidden" name="action" value="delete" />
+        <button class="btn danger" type="submit">Delete</button>
+      </form>
+    </div>
+  </div>
+
+  {% if errors %}
+    {% for e in errors %}
+      <div class="flash">{{ e }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <!-- MAIN CARD -->
+  <div class="card">
+    <form method="POST" action="{{ url_for('product_detail', product_id=p['id']) }}">
+      <input type="hidden" name="action" value="save" />
+
+      <div class="grid">
+
+        <div>
+          <label>Name *</label>
+          <input name="name" required value="{{ form.get('name','') }}" />
+        </div>
+
+        <div>
+          <label>Phase *</label>
+          {% set phase_value = (form.get('phase') if form else None) or (p.get('phase') if p else '') %}
+          <select name="phase" required>
+            <option value="" disabled {{ 'selected' if not phase_value else '' }}>Select</option>
+            <option value="liquid" {{ 'selected' if phase_value == 'liquid' else '' }}>Liquid</option>
+            <option value="solid"  {{ 'selected' if phase_value == 'solid' else '' }}>Solid</option>
+          </select>
+        </div>
+
+        <div>
+          <label>CAS</label>
+          <input name="cas" value="{{ form.get('cas','') }}" />
+        </div>
+
+        <div>
+          <label>Default Unit *</label>
+          {% set du = (form.get('default_unit','') or '').lower() %}
+          <select name="default_unit" required>
+            {% for v, label in [('gal','GAL'), ('lb','LB'), ('unit','UNIT')] %}
+              <option value="{{ v }}" {% if du==v %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label>Unit Cost *</label>
+          <input name="unit_cost" type="number" step="any" min="0" required value="{{ form.get('unit_cost','') }}" />
+        </div>
+
+        <div>
+          <label>Quantity *</label>
+          <input name="quantity" type="number" step="any" min="0" required value="{{ form.get('quantity','') }}" />
+        </div>
+
+        <div>
+          <label>Weight (LB/GAL)</label>
+          <input name="weight" type="number" step="any" min="0" value="{{ form.get('weight','') }}" />
+        </div>
+
+        <div>
+          <label>Supplier</label>
+          <input name="supplier" value="{{ form.get('supplier','') }}" />
+        </div>
+
+        <div>
+          <label>Package Type</label>
+          <input name="package_type" value="{{ form.get('package_type','') }}" />
+        </div>
+
+        <div>
+          <label>Package Size (GAL)</label>
+          <input name="package_size_gal" type="number" step="any" min="0" value="{{ form.get('package_size_gal','') }}" />
+        </div>
+
+        <div>
+          <label>Location</label>
+          <input name="location" value="{{ form.get('location','') }}" />
+        </div>
+
+        <div style="grid-column:1/-1;">
+          <label>Notes</label>
+          <textarea name="notes">{{ form.get('notes','') }}</textarea>
+        </div>
+
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; margin-top:18px;">
+        <button class="btn primary" type="submit">Save Changes</button>
+      </div>
+
+    </form>
+  </div>
+
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  const phaseSel = document.querySelector('[name="phase"]');
+  const weight = document.querySelector('[name="weight"]');
+  const defaultUnit = document.querySelector('[name="default_unit"]');
+
+  function toggleWeight() {
+    if (!phaseSel) return;
+
+    if (phaseSel.value === 'solid') {
+      if (weight) {
+        weight.value = '';
+        weight.disabled = true;
+      }
+      if (defaultUnit && defaultUnit.value === 'gal') {
+        defaultUnit.value = 'lb';
+      }
+    } else {
+      if (weight) weight.disabled = false;
+    }
+  }
+
+  if (phaseSel) {
+    phaseSel.addEventListener('change', toggleWeight);
+    toggleWeight();
+  }
+});
+</script>
+
+</body>
+</html>

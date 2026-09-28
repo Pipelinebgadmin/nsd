@@ -1,0 +1,1967 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* =========================================================
+     Adjust Inventory — layout & form system
+     ========================================================= */
+  .adjust-wrap { max-width: 1600px; margin: 0 auto; padding: 0 24px; }
+  .adjust-wrap .section-title { margin: 0 0 16px; }
+
+  /* ---- Tip banner ---- */
+  .adjust-tip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #f8fafc;
+  }
+  .adjust-tip .tip-label { font-weight: 700; color: #0f172a; }
+  .adjust-tip .tip-text { color: #6b7280; font-size: .9rem; }
+
+  /* ---- Tab shell ---- */
+  .adjust-shell { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; background: #fff; }
+
+  .adjust-tabs {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc;
+    padding: 0 6px;
+  }
+  .adjust-tabs .tab-btn {
+    border-radius: 0;
+    border: 0;
+    background: transparent;
+    padding: 14px 18px;
+    font-weight: 600;
+    color: #6b7280;
+    position: relative;
+  }
+  .adjust-tabs .tab-btn:hover { color: #0f172a; }
+  .adjust-tabs .tab-btn.active { color: #0d6efd; }
+  .adjust-tabs .tab-btn.active::after {
+    content: "";
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 0;
+    height: 2px;
+    background: #0d6efd; /* Bootstrap primary */
+  }
+  .adjust-tabs .tab-spacer { flex: 1; }
+  .adjust-tabs .tab-back { margin: 8px 8px 8px 0; }
+
+  .adjust-panel-wrap { padding: 24px; }
+
+  /* ---- Field system ---- */
+  .af-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+  .af-field > label { font-weight: 600; font-size: .875rem; color: #374151; margin: 0; }
+  .af-field input,
+  .af-field select {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: .9rem;
+    background: #fff;
+    color: #0f172a;
+  }
+  .af-field input:focus,
+  .af-field select:focus {
+    outline: none;
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, .12);
+  }
+
+  .af-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .af-row > .af-field { flex: 1; min-width: 200px; margin-bottom: 0; }
+
+  .af-qty-row { display: flex; gap: 10px; margin-bottom: 18px; }
+  .af-qty-row .af-field.qty { flex: 1; min-width: 160px; margin-bottom: 0; }
+  .af-qty-row .af-field.unit { flex: 0 0 110px; margin-bottom: 0; }
+
+  /* ---- Section box (Packages, notes, etc.) ---- */
+  .af-section {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 16px;
+    background: #f9fafb;
+    margin-bottom: 20px;
+  }
+  .af-section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .af-section-head .af-section-title { font-weight: 600; }
+  .af-section-head .af-section-note { color: #6b7280; font-size: .825rem; }
+  .af-section-sub { color: #6b7280; font-size: .875rem; margin-bottom: 10px; }
+
+  /* ---- Radio groups ---- */
+  .af-radio-group {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .af-radio-group .af-radio-label {
+    font-weight: 600;
+    font-size: .875rem;
+    color: #374151;
+  }
+  .af-radio-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 400;
+    width: auto;
+    margin: 0;
+    color: #374151;
+    font-size: .9rem;
+  }
+  .af-radio-option input { margin: 0; }
+
+  .af-stage-box {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+    background: #fff;
+  }
+  .af-stage-box .af-radio-group { margin-bottom: 0; }
+
+  .af-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+  /* ---- Package rows (Receive + Remove/Sell) ---- */
+  #pkg-rows:empty,
+  #pkg-rows-remove:empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 56px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+    color: #94a3b8;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  #pkg-rows:empty::before,
+  #pkg-rows-remove:empty::before {
+    content: "–";
+  }
+
+  .pkg-row {
+    display: grid;
+    grid-template-columns: 1.8fr .7fr .9fr auto;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 10px;
+  }
+  .pkg-row label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: .8rem;
+    font-weight: 600;
+    color: #374151;
+  }
+  .pkg-total {
+    padding: 9px 0;
+    font-weight: 600;
+    color: #94a3b8;
+  }
+
+  @media (max-width: 640px) {
+    .pkg-row { grid-template-columns: 1fr; }
+    .adjust-panel-wrap { padding: 16px; }
+    .adjust-tip { padding: 12px 14px; }
+    .adjust-wrap { padding: 0 12px; }
+  }
+
+  /* ---- Two-pane layout: form (left) + location browser (right) ---- */
+  .adjust-layout {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  /* location tabs reuse .adjust-tabs / .tab-btn, just allow wrapping since
+     there can be many locations */
+  .loc-tabs { flex-wrap: wrap; row-gap: 2px; }
+
+  .loc-panel-wrap { padding: 18px; min-height: 200px; }
+
+  .loc-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 160px;
+    color: #94a3b8;
+    font-size: .9rem;
+    text-align: center;
+  }
+
+  /* Location browser now renders a table (same column-per-package format
+     as the Products page) instead of package "chips". */
+  .loc-inv-table tbody tr { cursor: pointer; }
+  .loc-inv-table tbody tr:hover { background-color: #f8fbff; }
+
+  .loc-panel-note {
+    color: #6b7280;
+    font-size: .85rem;
+    margin-bottom: 12px;
+  }
+
+  @media (max-width: 900px) {
+    .adjust-layout { grid-template-columns: 1fr; }
+  }
+
+  /* ---- Blend tab ---- */
+  .blend-submode { display: flex; gap: 8px; margin-bottom: 20px; }
+  .blend-submode-btn {
+    border: 1px solid #d1d5db;
+    background: #fff;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 600;
+    font-size: .875rem;
+    color: #6b7280;
+    cursor: pointer;
+  }
+  .blend-submode-btn.active {
+    border-color: #0d6efd;
+    color: #0d6efd;
+    background: #eff6ff;
+  }
+
+  .blend-ing-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1.4fr auto;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 10px;
+  }
+  .blend-ing-row label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: .8rem;
+    font-weight: 600;
+    color: #374151;
+  }
+  #blend-ing-rows:empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 56px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+    color: #94a3b8;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  #blend-ing-rows:empty::before { content: "–"; }
+
+  .blend-preview-row {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 2px;
+    border-bottom: 1px solid #eef1f5;
+    font-size: .875rem;
+  }
+  .blend-preview-row:last-child { border-bottom: none; }
+  .blend-preview-row .bp-name { color: #0f172a; font-weight: 500; min-width: 200px; }
+  .blend-preview-row .bp-qty { color: #374151; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .blend-preview-row.bp-warn .bp-qty { color: #d97706; }
+  #blendPreviewList .loc-empty { color: #94a3b8; font-size: .85rem; text-align:center; }
+
+  @media (max-width: 640px) {
+    .blend-ing-row { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="adjust-wrap">
+
+  <h2 class="section-title">Adjust Inventory</h2>
+
+  {% if errors %}
+    <ul class="errors">
+      {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  <div class="adjust-tip">
+    <span class="tip-label">Quick tip:</span>
+    <span class="tip-text">
+      Use <strong>Receive</strong> when product comes in.
+      Use <strong>Remove</strong> when product goes out.
+      Staging is only a Yes/No toggle on Remove.
+    </span>
+  </div>
+
+  <div class="adjust-layout">
+
+  <!-- LEFT: TABS -->
+  <div class="adjust-shell">
+    <div class="adjust-tabs">
+      <button type="button" class="btn tab-btn" id="tabReceive" onclick="showTab('receive')">Receive</button>
+      <button type="button" class="btn tab-btn" id="tabRemove" onclick="showTab('remove')">Remove</button>
+      <button type="button" class="btn tab-btn" id="tabMove" onclick="showTab('move')">Move</button>
+      <button type="button" class="btn tab-btn" id="tabRepackage" onclick="showTab('repackage')">Repackage</button>
+      <button type="button" class="btn tab-btn" id="tabBlend" onclick="showTab('blend')">Blend</button>
+      <div class="tab-spacer"></div>
+      <a class="btn tab-back" href="{{ url_for('dashboard') }}">Back</a>
+    </div>
+
+    <div class="adjust-panel-wrap">
+
+      <!-- RECEIVE -->
+      <form id="panelReceive" method="POST" action="{{ url_for('inventory_adjust_page') }}">
+        <input type="hidden" name="action" value="add">
+
+        <div class="af-field">
+          <label>Product *</label>
+          <select name="product_id" required>
+            <option value="" disabled {{ 'selected' if not form.get('product_id') else '' }}>Select a product</option>
+            {% for p in products %}
+              <option value="{{ p['id'] }}" {{ 'selected' if form.get('product_id') == p['id'] else '' }}>
+                {{ p['name'] }} — on hand: {{ p.get('quantity',0) }} {{ p.get('default_unit','') }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="af-qty-row">
+          <div class="af-field qty">
+            <label>Quantity received *</label>
+            <input name="qty" inputmode="decimal" value="{{ form.get('qty','') }}" required>
+          </div>
+          <div class="af-field unit">
+            <label>&nbsp;</label>
+            {% set unit_value = form.get('unit','gal') %}
+            <select name="unit" required>
+              <option value="gal"  {{ 'selected' if unit_value == 'gal'  else '' }}>GAL</option>
+              <option value="lb"   {{ 'selected' if unit_value == 'lb'   else '' }}>LB</option>
+              <option value="unit" {{ 'selected' if unit_value == 'unit' else '' }}>UNIT</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="af-row">
+          <div class="af-field">
+            <label>Cost per unit *</label>
+            <input type="number" step="0.0001" min="0" name="receive_unit_cost" value="{{ form.get('receive_unit_cost','') }}" required>
+          </div>
+          <div class="af-field">
+            <label>Notes</label>
+            <input name="notes" value="{{ form.get('notes','') }}">
+          </div>
+        </div>
+
+        <div class="af-row">
+          <div class="af-field">
+            <label>Location (Incoming) *</label>
+            <select name="location_id" required>
+              <option value="" disabled {{ 'selected' if not form.get('location_id') else '' }}>Select a location</option>
+              {% for loc in locations %}
+                <option value="{{ loc['id'] }}" {{ 'selected' if form.get('location_id') == loc['id'] else '' }}>
+                  {{ loc['name'] }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+
+        <!-- ── Package rows (optional, multi) ── -->
+        <div class="af-section">
+          <div class="af-section-head">
+            <div>
+              <span class="af-section-title">Packages</span>
+              <span class="af-section-note">— optional. Pick package types or a tank (in gallons). Anything left goes to Unpackaged.</span>
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addPkgRow()">
+              + Add Package
+            </button>
+          </div>
+
+          <div id="pkg-rows">
+            <!-- rows injected by JS -->
+          </div>
+        </div>
+
+        <div class="af-actions">
+          <button class="btn primary" type="submit">Add to Inventory</button>
+        </div>
+      </form>
+
+      <!-- REMOVE -->
+      <form id="panelRemove" method="POST" action="{{ url_for('inventory_adjust_page') }}" style="display:none">
+        <input type="hidden" name="action" value="remove">
+        <input type="hidden" name="remove_mode" id="remove_mode_hidden" value="bulk">
+
+        <div class="af-field">
+          <label>Product *</label>
+          <select name="product_id" required>
+            <option value="" disabled {{ 'selected' if not form.get('product_id') else '' }}>Select a product</option>
+            {% for p in products %}
+              <option value="{{ p['id'] }}" {{ 'selected' if form.get('product_id') == p['id'] else '' }}>
+                {{ p['name'] }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="af-radio-group">
+          <span class="af-radio-label">Remove by:</span>
+          <label class="af-radio-option"><input type="radio" name="remove_mode_radio" value="bulk" checked onchange="updateRemoveMode()"> Bulk quantity (gal/lb/unit)</label>
+          <label class="af-radio-option"><input type="radio" name="remove_mode_radio" value="package" onchange="updateRemoveMode()"> Package type or tank (full containers, or gallons out of a tank)</label>
+        </div>
+
+        <!-- BULK FIELDS -->
+        <div class="af-qty-row" id="removeBulkFields">
+          <div class="af-field qty">
+            <label>Quantity to remove *</label>
+            <input name="qty" inputmode="decimal" value="{{ form.get('qty','') }}">
+          </div>
+          <div class="af-field unit">
+            <label>&nbsp;</label>
+            {% set remove_unit = form.get('unit','gal') %}
+            <select name="unit">
+              <option value="gal"  {{ 'selected' if remove_unit == 'gal'  else '' }}>GAL</option>
+              <option value="lb"   {{ 'selected' if remove_unit == 'lb'   else '' }}>LB</option>
+              <option value="unit" {{ 'selected' if remove_unit == 'unit' else '' }}>UNIT</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- PACKAGE FIELDS -->
+        <div id="removePkgFields" class="af-section" style="display:none">
+          <div class="af-section-head">
+            <span class="af-section-title">Packages to sell / remove</span>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addPkgRow('pkg-rows-remove','remove_package')">
+              + Add Package
+            </button>
+          </div>
+          <div id="removePkgAvailNote" class="af-section-sub">
+            Select a product to see packaged quantities on hand.
+          </div>
+          <div id="pkg-rows-remove"></div>
+        </div>
+
+        <div class="af-field">
+          <label>Location (Outgoing) *</label>
+          <select name="location_id" required>
+            <option value="" disabled {{ 'selected' if not form.get('location_id') else '' }}>Select a location</option>
+            {% for loc in locations %}
+              <option value="{{ loc['id'] }}" {{ 'selected' if form.get('location_id') == loc['id'] else '' }}>
+                {{ loc['name'] }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+
+        <div class="af-field">
+          <label>Notes</label>
+          <input name="notes" value="{{ form.get('notes','') }}">
+        </div>
+
+        <div class="af-stage-box">
+          <div class="af-radio-group">
+            <span class="af-radio-label">Stage this removal?</span>
+            <label class="af-radio-option"><input type="radio" name="stage" value="yes" {{ 'checked' if form.get('stage','yes') == 'yes' else '' }}> Yes</label>
+            <label class="af-radio-option"><input type="radio" name="stage" value="no"  {{ 'checked' if form.get('stage','yes') == 'no'  else '' }}> No</label>
+          </div>
+        </div>
+
+        <div class="af-actions">
+          <button class="btn primary" type="submit">Apply</button>
+        </div>
+      </form>
+
+      <!-- MOVE -->
+      <form id="panelMove" method="POST" action="{{ url_for('inventory_adjust_page') }}" style="display:none">
+        <input type="hidden" name="action" value="move">
+
+        <div class="af-field">
+          <label>Product *</label>
+          <select name="product_id" required>
+            <option value="" disabled selected>Select a product</option>
+            {% for p in products %}
+              <option value="{{ p['id'] }}">
+                {{ p['name'] }} — on hand: {{ p.get('quantity',0) }} {{ p.get('default_unit','') }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="af-qty-row">
+          <div class="af-field qty">
+            <label>Quantity to move *</label>
+            <input name="qty" inputmode="decimal" required>
+          </div>
+          <div class="af-field unit">
+            <label>&nbsp;</label>
+            <select name="unit" required>
+              <option value="gal">GAL</option>
+              <option value="lb">LB</option>
+              <option value="unit">UNIT</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="af-row">
+          <div class="af-field">
+            <label>From Location *</label>
+            <select name="from_location_id" id="from_location_id" required>
+              <option value="" disabled selected>Select a location</option>
+              {% for loc in locations %}
+                <option value="{{ loc['id'] }}">{{ loc['name'] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="af-field">
+            <label>To Location *</label>
+            <select name="to_location_id" id="to_location_id" required>
+              <option value="" disabled selected>Select a location</option>
+              {% for loc in locations %}
+                <option value="{{ loc['id'] }}">{{ loc['name'] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="af-row">
+          <div class="af-field">
+            <label>From Tank (optional)</label>
+            <select name="from_tank_id" id="from_tank_id">
+              <option value="">— No tank —</option>
+            </select>
+            <div class="form-text">Tanks must belong to the FROM location.</div>
+          </div>
+
+          <div class="af-field">
+            <label>To Tank (optional)</label>
+            <select name="to_tank_id" id="to_tank_id">
+              <option value="">— No tank —</option>
+            </select>
+            <div class="form-text">Tanks must belong to the TO location.</div>
+          </div>
+        </div>
+
+        <div class="af-field">
+          <label>Notes</label>
+          <input name="notes">
+        </div>
+
+        <div class="af-actions">
+          <button class="btn primary" type="submit">Move Inventory</button>
+        </div>
+      </form>
+
+      <!-- REPACKAGE -->
+      <form id="panelRepackage" method="POST" action="{{ url_for('inventory_adjust_page') }}" style="display:none" onsubmit="return validateRepackageSubmit(event)">
+        <input type="hidden" name="action" value="repackage">
+
+        <div class="af-field">
+          <label>Location *</label>
+          <select name="location_id" id="repackage_location_id" required onchange="onRepackageLocationChange()">
+            <option value="" disabled selected>Select a location</option>
+            {% for loc in locations %}
+              <option value="{{ loc['id'] }}">{{ loc['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="af-field">
+          <label>Product *</label>
+          <select name="product_id" id="repackage_product_id" required onchange="updateRepackageProductOnHand()">
+            <option value="" disabled selected>Select a product</option>
+            {% for p in products %}
+              <option value="{{ p['id'] }}">{{ p['name'] }}</option>
+            {% endfor %}
+          </select>
+          <div id="repackageProductOnHand" style="margin-top:4px; font-size:.8rem; color:#94a3b8;">
+            Select a location and product to see on-hand quantity.
+          </div>
+        </div>
+
+
+        <div class="af-field tank-field" id="repack_tank_id_wrap" style="display:none">
+          <label for="repack_tank_id">Filling from</label>
+          <select name="tank_id" id="repack_tank_id"></select>
+          <div class="tank-hint" style="margin-top:4px; font-size:.8rem; color:#64748b;">Where the product is coming out of. Leave it on loose stock unless you're filling from a tank.</div>
+        </div>
+        <div class="af-section-sub">
+          Packaging doesn't remove anything from the total — it just moves this amount from
+          Unpackaged into the packages below. The product's total gallons/lb stays the same.
+        </div>
+
+        <div class="af-section">
+          <div class="blend-submode">
+            <button type="button" class="blend-submode-btn active" id="repackModeBtnPackages"
+                    onclick="setRepackageMode('packages')">By Package Count</button>
+            <button type="button" class="blend-submode-btn" id="repackModeBtnBulk"
+                    onclick="setRepackageMode('bulk')">By Bulk Quantity</button>
+          </div>
+
+          <!-- MODE 1: user says how many of each package to make; bulk qty is calculated -->
+          <div id="repackModePackages">
+            <div class="af-section-head">
+              <div>
+                <span class="af-section-title">Packages or tanks to fill</span>
+                <span class="af-section-note">— add one row per package type, enter how many. The bulk quantity is worked out for you.</span>
+              </div>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addPkgRow('pkg-rows-repackage','repackage_package')">
+                + Add Package
+              </button>
+            </div>
+            <div id="pkg-rows-repackage">
+              <!-- rows injected by JS -->
+            </div>
+          </div>
+
+          <!-- MODE 2: user enters a bulk qty + one package type; system fills as many full
+               packages as it can and leaves the rest in Unpackaged automatically -->
+          <div id="repackModeBulk" style="display:none;">
+            <div class="af-qty-row">
+              <div class="af-field qty">
+                <label>Bulk quantity to repackage *</label>
+                <input type="text" inputmode="decimal" id="repackage_bulk_input"
+                       placeholder="e.g., 715" oninput="recalcRepackageBulkMode()">
+              </div>
+              <div class="af-field unit">
+                <label>&nbsp;</label>
+                <select id="repackage_bulk_unit" onchange="recalcRepackageBulkMode()">
+                  <option value="gal">GAL</option>
+                  <option value="lb">LB</option>
+                </select>
+              </div>
+            </div>
+            <div class="af-field">
+              <label>Package type to fill *</label>
+              <select id="repackage_bulk_package" onchange="recalcRepackageBulkMode()">
+                <option value="">Select a package type</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid #e5e7eb;">
+            <span style="font-weight:600; font-size:.875rem; color:#374151;">Total packaged volume</span>
+            <span id="repackageTotalVolume" class="font-monospace" style="font-weight:600; color:#94a3b8;">—</span>
+          </div>
+          <div id="repackageRemainderNote" style="margin-top:6px; font-size:.8rem; color:#94a3b8;"></div>
+        </div>
+
+        <input type="hidden" name="qty" id="repackage_qty" value="">
+        <input type="hidden" name="unit" id="repackage_unit_hidden" value="gal">
+
+        <div class="af-field">
+          <label>Notes</label>
+          <input name="notes">
+        </div>
+
+        <div class="af-actions">
+          <button class="btn primary" type="submit">Repackage</button>
+        </div>
+      </form>
+
+      <!-- BLEND -->
+      <div id="panelBlend" style="display:none">
+
+        <div class="blend-submode">
+          <button type="button" class="blend-submode-btn active" id="blendSubBtnCustom"
+                  onclick="setBlendSubMode('custom')">Custom Build</button>
+          <button type="button" class="blend-submode-btn" id="blendSubBtnFormula"
+                  onclick="setBlendSubMode('formula')">From Formula</button>
+        </div>
+
+        <form id="blendForm" method="POST" action="{{ url_for('blend_execute_at_location') }}">
+          <input type="hidden" name="blend_mode" id="blendModeField" value="custom">
+          <input type="hidden" name="next" value="{{ request.path }}">
+
+          <div class="af-field">
+            <label>Location *</label>
+            <select name="location_id" required>
+              <option value="" disabled selected>Select a location</option>
+              {% for loc in locations %}
+                <option value="{{ loc['id'] }}">{{ loc['name'] }}</option>
+              {% endfor %}
+            </select>
+            <span class="af-section-note">— ingredients are pulled only from this location's stock, and the finished blend is received back into it (same as Receive/Remove/Move/Repackage).</span>
+          </div>
+
+          <!-- CUSTOM BUILD -->
+          <div id="blendCustomFields">
+            <div class="af-row">
+              <div class="af-field">
+                <label>Blend name *</label>
+                <input type="text" name="name" placeholder="e.g., Shop Solvent A" required>
+              </div>
+            </div>
+
+            <div class="af-qty-row">
+              <div class="af-field qty">
+                <label>Target quantity *</label>
+                <input type="number" step="any" min="0" name="target_qty" id="blendTargetQty"
+                       oninput="updateBlendSums(); updateBlendPreview();" required>
+              </div>
+              <div class="af-field unit">
+                <label>&nbsp;</label>
+                <select name="target_unit" id="blendTargetUnit" onchange="updateBlendSums(); updateBlendPreview();">
+                  <option value="gal">GAL</option>
+                  <option value="lb">LB</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="af-radio-group">
+              <span class="af-radio-label">Mode:</span>
+              <label class="af-radio-option">
+                <input type="radio" name="mode" value="percent" checked onchange="setBlendCompMode('percent')"> Percent
+              </label>
+              <label class="af-radio-option">
+                <input type="radio" name="mode" value="absolute" onchange="setBlendCompMode('absolute')"> Absolute
+              </label>
+            </div>
+
+            <div class="af-section">
+              <div class="af-section-head">
+                <div>
+                  <span class="af-section-title">Ingredients</span>
+                  <span class="af-section-note" id="blendPercentSumWrap">— Percent total: <b id="blendPercentSum">0</b>%</span>
+                  <span class="af-section-note" id="blendAbsSumWrap" style="display:none">— Sum: <b id="blendAbsSum">0</b> <span id="blendAbsSumUnit">GAL</span></span>
+                </div>
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addBlendIngRow()">
+                  + Add Ingredient
+                </button>
+              </div>
+              <div id="blend-ing-rows"></div>
+            </div>
+          </div>
+
+          <!-- FROM FORMULA -->
+          <div id="blendFormulaFields" style="display:none">
+            <div class="af-field">
+              <label>Formula *</label>
+              <select name="formula_id" id="blendFormulaSelect">
+                <option value="" disabled selected>Select a formula</option>
+                {% for f in formulas %}
+                  <option value="{{ f['id'] }}">{{ f['name'] }}</option>
+                {% endfor %}
+              </select>
+              {% if not formulas %}
+                <span class="af-section-note">No saved formulas yet — create one from the Blend Builder page.</span>
+              {% endif %}
+            </div>
+
+            <div class="af-qty-row">
+              <div class="af-field qty">
+                <label>Batch quantity *</label>
+                <input type="number" step="any" min="0" name="batch_qty" id="blendBatchQty">
+              </div>
+              <div class="af-field unit">
+                <label>&nbsp;</label>
+                <select name="batch_unit" id="blendBatchUnit">
+                  <option value="gal">GAL</option>
+                  <option value="lb">LB</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- PREVIEW: products & qty used to execute this blend -->
+          <div class="af-section">
+            <div class="af-section-head">
+              <div>
+                <span class="af-section-title">Products used in this blend</span>
+                <span class="af-section-note">— updates as you fill in the form above.</span>
+              </div>
+            </div>
+            <div id="blendPreviewList">
+              <div class="loc-empty" style="min-height:56px;">Add ingredients (or pick a formula + batch size) to see quantities.</div>
+            </div>
+          </div>
+
+          <!-- PACKAGE THE FINISHED BLEND -->
+          <div class="af-section">
+            <div class="af-section-head">
+              <div>
+                <span class="af-section-title">Package the finished blend</span>
+                <span class="af-section-note">— optional. Leave blank to leave it all Unpackaged.</span>
+              </div>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addPkgRow('pkg-rows-blend','blend_package')">
+                + Add Package
+              </button>
+            </div>
+            <div id="pkg-rows-blend"></div>
+          </div>
+
+          <div class="af-field">
+            <label>Notes</label>
+            <input name="notes">
+          </div>
+
+          <div class="af-actions">
+            <button class="btn primary" type="submit">Execute Blend</button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT: LOCATION BROWSER -->
+  <div class="adjust-shell">
+    <div class="adjust-tabs loc-tabs" id="locTabs">
+      {% for loc in locations %}
+        <button type="button" class="btn tab-btn loc-tab-btn" id="locTab-{{ loc['id'] }}"
+                onclick="showLocation('{{ loc['id'] }}')">{{ loc['name'] }}</button>
+      {% endfor %}
+    </div>
+
+    <div class="loc-panel-wrap">
+      <div class="loc-panel-note" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>Click a product below to select it in the form on the left.</span>
+        <div class="unit-toggle" style="display:inline-flex; border:1px solid #e2e8f0; border-radius:999px; overflow:hidden; flex-shrink:0;">
+          <button type="button" id="unitToggleGal" class="unit-toggle-btn active"
+                  onclick="setLocDisplayUnit('gal')"
+                  style="border:0; padding:4px 12px; font-size:.8rem; font-weight:600; cursor:pointer; background:#334155; color:#fff;">
+            GAL
+          </button>
+          <button type="button" id="unitToggleLb" class="unit-toggle-btn"
+                  onclick="setLocDisplayUnit('lb')"
+                  style="border:0; padding:4px 12px; font-size:.8rem; font-weight:600; cursor:pointer; background:#f8fafc; color:#334155;">
+            LB
+          </button>
+        </div>
+      </div>
+      <div id="locPanelBody">
+        <div class="loc-empty">Select a location to see what's on hand.</div>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
+</div>
+
+<script>
+  const LOCATIONS = [
+    {% for loc in locations %}
+      { id: "{{ loc['id'] }}", name: {{ loc['name'] | tojson }} },
+    {% endfor %}
+  ];
+
+  const locInventoryCache = {};
+
+  // GAL / LB toggle for the location browser panel — lets everything
+  // (Total + Unpackaged) display in one consistent unit, converting via
+  // each product's weight (lb/gal) where possible.
+  let locDisplayUnit = 'gal';
+
+  function setLocDisplayUnit(unit) {
+    locDisplayUnit = unit;
+
+    const galBtn = document.getElementById('unitToggleGal');
+    const lbBtn  = document.getElementById('unitToggleLb');
+    const activeStyle   = { background: '#334155', color: '#fff' };
+    const inactiveStyle = { background: '#f8fafc', color: '#334155' };
+
+    Object.assign(galBtn.style, unit === 'gal' ? activeStyle : inactiveStyle);
+    Object.assign(lbBtn.style,  unit === 'lb'  ? activeStyle : inactiveStyle);
+
+    if (window.activeLocationId && locInventoryCache[window.activeLocationId]) {
+      renderLocationInventory(locInventoryCache[window.activeLocationId]);
+    }
+  }
+
+  // Convert a quantity from a product's own default unit into the
+  // currently selected display unit (gal or lb), using the product's
+  // weight (lb per gal). Returns null if conversion isn't possible
+  // (e.g. 'unit'-tracked products, or missing weight) — caller falls
+  // back to showing the product's native unit in that case.
+  function convertQtyForDisplay(qty, prodUnit, weight, displayUnit) {
+    const u = (prodUnit || '').toLowerCase();
+    const w = Number(weight);
+
+    if (u === displayUnit) return qty;
+
+    if (u === 'gal' && displayUnit === 'lb') {
+      if (!w || w <= 0) return null;
+      return qty * w;
+    }
+    if (u === 'lb' && displayUnit === 'gal') {
+      if (!w || w <= 0) return null;
+      return qty / w;
+    }
+    // 'unit'-tracked products have no gal/lb equivalent
+    return null;
+  }
+
+  function renderLocationInventory(data) {
+    const body = document.getElementById('locPanelBody');
+    if (!data || !data.products || data.products.length === 0) {
+      body.innerHTML = '<div class="loc-empty">No inventory on hand at this location.</div>';
+      return;
+    }
+
+    // Column headers: one per package type, same style as the Products page
+    // (name on top, volume + unit underneath).
+    let headCols = '';
+    for (const pk of PKG_OPTIONS) {
+      headCols += `
+        <th class="text-nowrap text-center" style="font-size:.8rem;">
+          ${pk.name}<br><span class="text-muted" style="font-size:.75rem;">${pk.volume} ${pk.unit}</span>
+        </th>`;
+    }
+
+    let rows = '';
+    for (const prod of data.products) {
+      const displayUnitLabel = locDisplayUnit.toUpperCase();
+
+      const bulkConverted = convertQtyForDisplay(prod.bulk_qty, prod.unit, prod.weight, locDisplayUnit);
+      const bulkLabel = (bulkConverted !== null && bulkConverted)
+        ? `${Number(bulkConverted).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${displayUnitLabel}`
+        : (prod.bulk_qty
+            ? `${Number(prod.bulk_qty).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${(prod.unit || '').toUpperCase()}`
+            : '<span class="text-muted">—</span>');
+
+      const unpackagedConverted = convertQtyForDisplay(prod.unpackaged_qty, prod.unit, prod.weight, locDisplayUnit);
+      const unpackagedLabel = (unpackagedConverted !== null && unpackagedConverted)
+        ? `${Number(unpackagedConverted).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${displayUnitLabel}`
+        : (prod.unpackaged_qty
+            ? `${Number(prod.unpackaged_qty).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${(prod.unit || '').toUpperCase()}`
+            : '<span class="text-muted">—</span>');
+
+      // Look up this product's per-package quantity by package id, falling
+      // back to matching on package name if an id isn't present.
+      const byId = {};
+      (prod.packages || []).forEach(pk => {
+        if (pk.package_id != null) byId[String(pk.package_id)] = pk.quantity;
+      });
+
+      let pkgCells = '';
+      for (const pk of PKG_OPTIONS) {
+        let qty = byId[String(pk.id)];
+        if (qty === undefined) {
+          const match = (prod.packages || []).find(p => p.package_name === pk.name);
+          qty = match ? match.quantity : undefined;
+        }
+        pkgCells += `<td class="font-monospace text-center">${
+          (qty && qty > 0) ? Math.trunc(qty) : '<span class="text-muted">—</span>'
+        }</td>`;
+      }
+
+      rows += `
+        <tr onclick="selectLocationProduct('${prod.product_id}')">
+          <td class="fw-semibold">${prod.product_name}</td>
+          <td class="font-monospace">${bulkLabel}</td>
+          <td class="font-monospace text-muted">${unpackagedLabel}</td>
+          ${pkgCells}
+        </tr>`;
+    }
+
+    body.innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle loc-inv-table">
+          <thead class="table-light">
+            <tr>
+              <th>Product</th>
+              <th class="text-nowrap">Total</th>
+              <th class="text-nowrap">Unpackaged</th>
+              ${headCols}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+
+  function showLocation(locationId) {
+    document.querySelectorAll('.loc-tab-btn').forEach(btn => btn.classList.remove('active'));
+    const activeBtn = document.getElementById(`locTab-${locationId}`);
+    if (activeBtn) activeBtn.classList.add('active');
+
+    window.activeLocationId = locationId;
+
+    if (locInventoryCache[locationId]) {
+      renderLocationInventory(locInventoryCache[locationId]);
+      return;
+    }
+
+    const body = document.getElementById('locPanelBody');
+    body.innerHTML = '<div class="loc-empty">Loading…</div>';
+
+    fetch(`/api/location_inventory/${encodeURIComponent(locationId)}`)
+      .then(r => r.json())
+      .then(data => {
+        locInventoryCache[locationId] = data;
+        renderLocationInventory(data);
+      })
+      .catch(() => {
+        body.innerHTML = '<div class="loc-empty">Could not load inventory for this location.</div>';
+      });
+  }
+
+  // Selecting a product on the right auto-fills the Product field on
+  // whichever left-side tab (Receive/Remove/Move) is currently active.
+  function selectLocationProduct(productId) {
+    const which = window.activeAdjustTab || 'receive';
+    const panelId = which === 'remove' ? 'panelRemove'
+      : which === 'move' ? 'panelMove'
+      : which === 'repackage' ? 'panelRepackage'
+      : 'panelReceive';
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+
+    const sel = panel.querySelector('select[name="product_id"]');
+    if (!sel) return;
+
+    sel.value = productId;
+    sel.dispatchEvent(new Event('change'));
+
+    // Also point the matching location field at this location, if present.
+    const locSel = panel.querySelector('select[name="location_id"], select[name="from_location_id"]');
+    if (locSel && window.activeLocationId) {
+      locSel.value = window.activeLocationId;
+      locSel.dispatchEvent(new Event('change'));
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    if (LOCATIONS.length > 0) {
+      showLocation(LOCATIONS[0].id);
+    }
+  });
+</script>
+
+<script>
+  const TANKS_BY_LOC = {{ tanks_by_loc | tojson }};
+</script>
+
+<script>
+  function renderTankOptions(selectEl, locationId) {
+    selectEl.innerHTML = '';
+
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '— No tank —';
+    selectEl.appendChild(opt0);
+
+    if (!locationId) return;
+
+    const key = String(locationId);
+    const tanks = (TANKS_BY_LOC && TANKS_BY_LOC[key]) ? TANKS_BY_LOC[key] : [];
+
+    for (const t of tanks) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = tankLabel(t);
+      selectEl.appendChild(opt);
+    }
+  }
+
+  function tankLabel(t) {
+    const n = (x) => Number(x || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return t.product_id
+      ? `${t.name} — ${t.product_name || 'in use'}, ${n(t.fill_gal)} gal (room for ${n(t.free_gal)})`
+      : `${t.name} — empty, room for ${n(t.free_gal)} gal`;
+  }
+
+  // Tank dropdown for one product: 'in' shows tanks that are empty or already hold it,
+  // 'out' shows only tanks that hold it. Hidden when there are no usable tanks.
+  function renderProductTanks(selectEl, locationId, productId, mode) {
+    const wrap = document.getElementById(selectEl.id + '_wrap');
+    const keep = selectEl.value;
+    const tanks = (TANKS_BY_LOC && TANKS_BY_LOC[String(locationId || '')]) || [];
+    const usable = tanks.filter(t => mode === 'in'
+      ? (!t.product_id || t.product_id === String(productId))
+      : (t.product_id === String(productId) && t.fill_gal > 0));
+    selectEl.innerHTML = '<option value="">' + (selectEl.id === 'repack_tank_id' ? 'Loose stock (not a tank)' : '— No tank —') + '</option>' +
+      usable.map(t => `<option value="${t.id}">${tankLabel(t).replace(/</g, '&lt;')}</option>`).join('');
+    if (usable.some(t => t.id === keep)) selectEl.value = keep;
+    if (wrap) wrap.style.display = (productId && usable.length) ? '' : 'none';
+  }
+
+  function wireProductTankField(formId, tankSelId, mode, locSelector, prodSelector) {
+    const form = document.getElementById(formId);
+    const tankSel = document.getElementById(tankSelId);
+    if (!form || !tankSel) return;
+    const loc = form.querySelector(locSelector), prod = form.querySelector(prodSelector);
+    const refresh = () => {
+      if (formId === 'panelRemove' && (document.getElementById('remove_mode_hidden')?.value === 'package')) {
+        tankSel.value = ''; document.getElementById(tankSelId + '_wrap').style.display = 'none'; return;
+      }
+      renderProductTanks(tankSel, loc && loc.value, prod && prod.value, mode);
+    };
+    [loc, prod].forEach(el => el && el.addEventListener('change', refresh));
+    form.querySelectorAll('input[name="remove_mode_radio"]').forEach(r => r.addEventListener('change', refresh));
+    refresh();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    wireProductTankField('panelRepackage', 'repack_tank_id', 'out', '#repackage_location_id', '#repackage_product_id');
+    // Keep the tank choices inside each package list in step with the product + location
+    [['panelReceive', 'pkg-rows'], ['panelRemove', 'pkg-rows-remove'], ['panelRepackage', 'pkg-rows-repackage']].forEach(([formId, rowsId]) => {
+      const form = document.getElementById(formId);
+      if (!form) return;
+      form.querySelectorAll('select[name="location_id"], select[name="product_id"]').forEach(el =>
+        el.addEventListener('change', () => rerenderPkgSelects(rowsId)));
+    });
+  });
+
+  function wireMoveTankDropdowns() {
+    const fromLoc = document.getElementById('from_location_id');
+    const toLoc = document.getElementById('to_location_id');
+    const fromTank = document.getElementById('from_tank_id');
+    const toTank = document.getElementById('to_tank_id');
+
+    if (!fromLoc || !toLoc || !fromTank || !toTank) return;
+
+    renderTankOptions(fromTank, fromLoc.value);
+    renderTankOptions(toTank, toLoc.value);
+
+    fromLoc.addEventListener('change', () => renderTankOptions(fromTank, fromLoc.value));
+    toLoc.addEventListener('change', () => renderTankOptions(toTank, toLoc.value));
+  }
+
+  document.addEventListener('DOMContentLoaded', wireMoveTankDropdowns);
+</script>
+
+<script>
+  // ── Package definitions passed from Flask ──
+  const PKG_OPTIONS = [
+    {% if packages %}
+      {% for pk in packages %}
+        { id: "{{ pk.id }}", name: {{ pk.name | tojson }}, volume: {{ pk.volume }}, unit: "{{ pk.unit | upper }}" },
+      {% endfor %}
+    {% endif %}
+  ];
+
+  function buildPkgSelectHTML(selectedId, availMap, tankOpts) {
+    let html = '<option value="">— No package (bulk) —</option>';
+    for (const pk of PKG_OPTIONS) {
+      const sel = pk.id === selectedId ? 'selected' : '';
+      let label = `${pk.name} — ${pk.volume} ${pk.unit}`;
+      if (availMap && Object.prototype.hasOwnProperty.call(availMap, pk.id)) {
+        label += ` (on hand: ${availMap[pk.id]})`;
+      }
+      html += `<option value="${pk.id}" data-volume="${pk.volume}" data-unit="${pk.unit}" ${sel}>${label}</option>`;
+    }
+    // Tanks act like a package, measured in gallons (volume 1 GAL per "unit")
+    if (tankOpts && tankOpts.length) {
+      html += '<optgroup label="Tanks (enter gallons)">';
+      for (const t of tankOpts) {
+        const v = 'tank:' + t.id;
+        const sel = v === selectedId ? 'selected' : '';
+        html += `<option value="${v}" data-volume="1" data-unit="GAL" data-tank="1" data-limit="${t.limit}" ${sel}>${t.label.replace(/</g, '&lt;')}</option>`;
+      }
+      html += '</optgroup>';
+    }
+    return html;
+  }
+
+  // Which tanks belong in a package list: Receive + Repackage (filling) = empty tanks or ones
+  // holding this product; Remove = only tanks holding it. Blend rows never show tanks here.
+  function tankOptionsFor(containerId) {
+    const n = (x) => Number(x || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    let form, locSel, prodSel, mode;
+    if (containerId === 'pkg-rows') { form = document.getElementById('panelReceive'); mode = 'in'; }
+    else if (containerId === 'pkg-rows-remove') { form = document.getElementById('panelRemove'); mode = 'out'; }
+    else if (containerId === 'pkg-rows-repackage') { form = document.getElementById('panelRepackage'); mode = 'in'; }
+    else return [];
+    if (!form) return [];
+    locSel = form.querySelector('select[name="location_id"]');
+    prodSel = form.querySelector('select[name="product_id"]');
+    const loc = locSel && locSel.value, pid = prodSel && prodSel.value;
+    if (!loc || !pid) return [];
+    const tanks = (TANKS_BY_LOC && TANKS_BY_LOC[String(loc)]) || [];
+    return tanks
+      .filter(t => mode === 'in' ? (!t.product_id || t.product_id === String(pid)) : (t.product_id === String(pid) && t.fill_gal > 0))
+      .map(t => mode === 'in'
+        ? { id: t.id, limit: t.free_gal, label: `${t.name} (tank) — ${t.product_id ? n(t.fill_gal) + ' gal in, ' : 'empty, '}room for ${n(t.free_gal)} gal` }
+        : { id: t.id, limit: t.fill_gal, label: `${t.name} (tank) — ${n(t.fill_gal)} gal in it` });
+  }
+
+  function rerenderPkgSelects(containerId) {
+    const tankOpts = tankOptionsFor(containerId);
+    const avail = containerId === 'pkg-rows-remove' ? (window.REMOVE_PKG_AVAIL || {}) : null;
+    document.querySelectorAll('#' + containerId + ' .pkg-select').forEach(sel => {
+      const current = sel.value;
+      sel.innerHTML = buildPkgSelectHTML(current, avail, tankOpts);
+      if (current && sel.value !== current) sel.value = '';
+      syncPkgRowMode(sel.closest('.pkg-row'));
+      recalcRow(sel.closest('.pkg-row'));
+    });
+    afterPkgRowChange(containerId);
+  }
+
+  // A tank row asks for gallons instead of a container count
+  function syncPkgRowMode(row) {
+    if (!row) return;
+    const sel = row.querySelector('.pkg-select'), qty = row.querySelector('.pkg-qty');
+    const lbl = qty && qty.previousElementSibling;
+    const opt = sel.options[sel.selectedIndex];
+    const isTank = !!(opt && opt.dataset.tank);
+    if (lbl) lbl.textContent = isTank ? 'Gallons' : '# of Containers';
+    qty.step = isTank ? 'any' : '1';
+    qty.min = isTank ? '0' : '1';
+    qty.placeholder = isTank ? 'e.g., 500' : 'e.g., 4';
+    if (isTank) qty.max = opt.dataset.limit; else qty.removeAttribute('max');
+  }
+
+  function recalcRow(row) {
+    if (!row) return;
+    const sel = row.querySelector('.pkg-select');
+    const qtyInp = row.querySelector('.pkg-qty');
+    const totalEl = row.querySelector('.pkg-total');
+    if (!sel || !qtyInp || !totalEl) return;
+
+    const opt = sel.options[sel.selectedIndex];
+    const volume = parseFloat(opt?.dataset?.volume || '0');
+    const unit   = opt?.dataset?.unit || '';
+    const qty    = parseFloat(qtyInp.value || '0');
+
+    if (sel.value && volume > 0 && qty > 0) {
+      const total = (volume * qty).toLocaleString(undefined, { maximumFractionDigits: 4 });
+      totalEl.textContent = `${total} ${unit}`;
+      totalEl.style.color = '#0f172a';
+    } else {
+      totalEl.textContent = '—';
+      totalEl.style.color = '#94a3b8';
+    }
+  }
+
+  // containerId/namePrefix let us reuse this for both the Receive "Packages" rows
+  // and the Remove "Sell by package type" rows without name collisions.
+  function addPkgRow(containerId, namePrefix, selectedId, qty) {
+    containerId = containerId || 'pkg-rows';
+    namePrefix = namePrefix || 'package';
+    const wrap = document.getElementById(containerId);
+    if (!wrap) return;
+
+    const availMap = (containerId === 'pkg-rows-remove') ? (window.REMOVE_PKG_AVAIL || {}) : null;
+
+    const row = document.createElement('div');
+    row.className = 'pkg-row';
+
+    row.innerHTML = `
+      <div>
+        <label>Package Type</label>
+        <select name="${namePrefix}_id[]" class="pkg-select">
+          ${buildPkgSelectHTML(selectedId || '', availMap, tankOptionsFor(containerId))}
+        </select>
+      </div>
+      <div>
+        <label># of Containers</label>
+        <input name="${namePrefix}_qty[]" class="pkg-qty" type="number" step="1" min="1"
+               placeholder="e.g., 4">
+      </div>
+      <div>
+        <label>Total Volume</label>
+        <div class="pkg-total">—</div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; padding-bottom:2px;">
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removePkgRow(this)">Remove</button>
+      </div>
+    `;
+
+    if (qty) row.querySelector('.pkg-qty').value = qty;
+
+    row.querySelector('.pkg-select').addEventListener('change', () => { syncPkgRowMode(row); recalcRow(row); afterPkgRowChange(containerId); });
+    row.querySelector('.pkg-qty').addEventListener('input', () => { recalcRow(row); afterPkgRowChange(containerId); });
+
+    wrap.appendChild(row);
+
+    // If a package was pre-selected, calc immediately
+    if (selectedId) recalcRow(row);
+    afterPkgRowChange(containerId);
+  }
+
+  function removePkgRow(btn) {
+    const row = btn.closest('.pkg-row');
+    if (!row) return;
+    const containerId = row.parentElement ? row.parentElement.id : null;
+    // Always allow full removal — user can have zero rows (bulk only)
+    row.remove();
+    if (containerId) afterPkgRowChange(containerId);
+  }
+
+  // Hook for side effects when a package-row container changes
+  // (e.g. keeping the Repackage tab's running total in sync). Skipped for
+  // the Repackage container while in "bulk quantity" mode, since that mode
+  // drives the rows programmatically and manages its own summary text.
+  function afterPkgRowChange(containerId) {
+    if (containerId === 'pkg-rows-repackage' && window.repackageMode !== 'bulk') {
+      recalcRepackagePackagesMode();
+    }
+  }
+
+  // MODE 1 ("By Package Count"): sums the "Total Volume" across every row
+  // in the Repackage panel, and that sum IS the bulk quantity pulled from
+  // Unpackaged — no separate entry, no mismatch possible.
+  function recalcRepackagePackagesMode() {
+    const totalEl = document.getElementById('repackageTotalVolume');
+    const noteEl = document.getElementById('repackageRemainderNote');
+    const qtyHidden = document.getElementById('repackage_qty');
+    const unitHidden = document.getElementById('repackage_unit_hidden');
+    if (!totalEl) return;
+
+    let total = 0;
+    let unit = '';
+    document.querySelectorAll('#pkg-rows-repackage .pkg-row').forEach(row => {
+      const sel = row.querySelector('.pkg-select');
+      const qtyInp = row.querySelector('.pkg-qty');
+      const opt = sel.options[sel.selectedIndex];
+      const volume = parseFloat(opt?.dataset?.volume || '0');
+      const u = (opt?.dataset?.unit || '').toLowerCase();
+      const qty = parseFloat(qtyInp.value || '0');
+      if (sel.value && volume > 0 && qty > 0) {
+        total += volume * qty;
+        unit = u;
+      }
+    });
+
+    if (qtyHidden) qtyHidden.value = total > 0 ? total : '';
+    if (unitHidden) unitHidden.value = unit || 'gal';
+
+    if (total > 0) {
+      totalEl.textContent = `${total.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${unit.toUpperCase()}`;
+      totalEl.style.color = '#0f172a';
+    } else {
+      totalEl.textContent = '—';
+      totalEl.style.color = '#94a3b8';
+    }
+    if (noteEl) noteEl.textContent = '';
+  }
+
+  // Looks up the selected product's weight (lb/gal) for the selected
+  // location, from the same cache the on-hand line already uses. Needed to
+  // convert between GAL and LB when the user's entered unit differs from
+  // the package's own unit.
+  function getRepackageProductWeight() {
+    const locSel = document.getElementById('repackage_location_id');
+    const prodSel = document.getElementById('repackage_product_id');
+    const data = locSel && locInventoryCache[locSel.value];
+    if (!data || !prodSel) return 0;
+    const prod = (data.products || []).find(p => String(p.product_id) === String(prodSel.value));
+    return prod ? Number(prod.weight || 0) : 0;
+  }
+
+  // Populate the single package-type dropdown used in "By Bulk Quantity" mode
+  function buildRepackageBulkPackageOptions() {
+    const sel = document.getElementById('repackage_bulk_package');
+    if (!sel) return;
+    let html = '<option value="">Select a package type</option>';
+    for (const pk of PKG_OPTIONS) {
+      html += `<option value="${pk.id}" data-volume="${pk.volume}" data-unit="${pk.unit}">${pk.name} — ${pk.volume} ${pk.unit}</option>`;
+    }
+    sel.innerHTML = html;
+  }
+
+  // MODE 2 ("By Bulk Quantity"): user enters a bulk qty + one package type;
+  // we fill as many FULL packages as possible and leave the remainder
+  // untouched (it simply stays part of Unpackaged — nothing to submit for it).
+  function recalcRepackageBulkMode() {
+    const totalEl = document.getElementById('repackageTotalVolume');
+    const noteEl = document.getElementById('repackageRemainderNote');
+    const qtyHidden = document.getElementById('repackage_qty');
+    const unitHidden = document.getElementById('repackage_unit_hidden');
+    const rowsWrap = document.getElementById('pkg-rows-repackage');
+    if (!totalEl) return;
+
+    const bulkInput = document.getElementById('repackage_bulk_input');
+    const bulkUnitSel = document.getElementById('repackage_bulk_unit');
+    const pkgSel = document.getElementById('repackage_bulk_package');
+
+    const bulkQty = parseFloat(bulkInput?.value || '0');
+    const bulkUnit = (bulkUnitSel?.value || 'gal').toLowerCase();
+    const pkgOpt = pkgSel && pkgSel.options[pkgSel.selectedIndex];
+    const pkgId = pkgSel ? pkgSel.value : '';
+    const pkgVolume = parseFloat(pkgOpt?.dataset?.volume || '0');
+    const pkgUnit = (pkgOpt?.dataset?.unit || '').toLowerCase();
+
+    const reset = () => {
+      if (rowsWrap) rowsWrap.innerHTML = '';
+      if (qtyHidden) qtyHidden.value = '';
+      if (unitHidden) unitHidden.value = bulkUnit || 'gal';
+    };
+
+    if (!pkgId || !bulkQty || bulkQty <= 0) {
+      reset();
+      totalEl.textContent = '—';
+      totalEl.style.color = '#94a3b8';
+      if (noteEl) noteEl.textContent = '';
+      return;
+    }
+
+    const weight = getRepackageProductWeight();
+    const bulkInPkgUnit = (bulkUnit === pkgUnit)
+      ? bulkQty
+      : convertQtyForDisplay(bulkQty, bulkUnit, weight, pkgUnit);
+
+    if (bulkInPkgUnit === null) {
+      reset();
+      totalEl.textContent = '—';
+      totalEl.style.color = '#94a3b8';
+      if (noteEl) {
+        noteEl.textContent = `Can't convert ${bulkUnit.toUpperCase()} to ${pkgUnit.toUpperCase()} for this product — enter the quantity in ${pkgUnit.toUpperCase()} instead.`;
+      }
+      return;
+    }
+
+    const containers = pkgVolume > 0 ? Math.floor(bulkInPkgUnit / pkgVolume) : 0;
+    const packagedAmount = containers * pkgVolume;
+    const remainderInPkgUnit = Math.max(0, bulkInPkgUnit - packagedAmount);
+
+    const fmt = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+    if (qtyHidden) qtyHidden.value = packagedAmount > 0 ? packagedAmount : '';
+    if (unitHidden) unitHidden.value = pkgUnit;
+
+    if (rowsWrap) rowsWrap.innerHTML = '';
+    if (containers > 0) {
+      addPkgRow('pkg-rows-repackage', 'repackage_package', pkgId, containers);
+      totalEl.textContent = `${containers} × ${pkgOpt.textContent.split(' — ')[0]} = ${fmt(packagedAmount)} ${pkgUnit.toUpperCase()}`;
+      totalEl.style.color = '#0f172a';
+    } else {
+      totalEl.textContent = '—';
+      totalEl.style.color = '#94a3b8';
+    }
+
+    if (remainderInPkgUnit > 0.0001) {
+      const remainderInBulkUnit = (bulkUnit === pkgUnit)
+        ? remainderInPkgUnit
+        : convertQtyForDisplay(remainderInPkgUnit, pkgUnit, weight, bulkUnit);
+      const remainderText = remainderInBulkUnit !== null
+        ? `${fmt(remainderInBulkUnit)} ${bulkUnit.toUpperCase()}`
+        : `${fmt(remainderInPkgUnit)} ${pkgUnit.toUpperCase()}`;
+      noteEl.textContent = containers > 0
+        ? `${remainderText} isn't enough for another full package — it stays Unpackaged.`
+        : `Not enough for a full ${pkgOpt.textContent.split(' — ')[0]} yet — the full amount stays Unpackaged.`;
+    } else if (noteEl) {
+      noteEl.textContent = '';
+    }
+  }
+
+  window.repackageMode = 'packages';
+
+  function setRepackageMode(mode) {
+    window.repackageMode = mode;
+    const btnPkg = document.getElementById('repackModeBtnPackages');
+    const btnBulk = document.getElementById('repackModeBtnBulk');
+    const panelPkg = document.getElementById('repackModePackages');
+    const panelBulk = document.getElementById('repackModeBulk');
+    if (!btnPkg || !btnBulk || !panelPkg || !panelBulk) return;
+
+    if (mode === 'bulk') {
+      btnPkg.classList.remove('active');
+      btnBulk.classList.add('active');
+      panelPkg.style.display = 'none';
+      panelBulk.style.display = '';
+      recalcRepackageBulkMode();
+    } else {
+      btnBulk.classList.remove('active');
+      btnPkg.classList.add('active');
+      panelBulk.style.display = 'none';
+      panelPkg.style.display = '';
+      recalcRepackagePackagesMode();
+    }
+  }
+
+  // Belt-and-suspenders check before submit, since the real qty field is
+  // now hidden/computed rather than directly typed by the user.
+  function validateRepackageSubmit(evt) {
+    const qtyHidden = document.getElementById('repackage_qty');
+    const qty = parseFloat(qtyHidden?.value || '0');
+    if (!qty || qty <= 0) {
+      evt.preventDefault();
+      alert(window.repackageMode === 'bulk'
+        ? 'Enter a bulk quantity large enough to fill at least one package.'
+        : 'Add at least one package with a quantity greater than 0.');
+      return false;
+    }
+    return true;
+  }
+
+  buildRepackageBulkPackageOptions();
+
+  // Start with one empty row if packages exist (Receive tab)
+  if (PKG_OPTIONS.length > 0) {
+    addPkgRow('pkg-rows', 'package');
+    addPkgRow('pkg-rows-repackage', 'repackage_package');
+    addPkgRow('pkg-rows-blend', 'blend_package');
+  }
+
+  // ── Repackage tab: on-hand display (below the product select) ──
+  // Location is picked first, so once both Location and Product are
+  // selected we show that product's Unpackaged quantity AT that location
+  // (the actual ceiling for repackaging) in both GAL and LB. Reuses the
+  // same /api/location_inventory endpoint + cache + conversion helper as
+  // the location browser panel on the right.
+  function onRepackageLocationChange() {
+    const locSel = document.getElementById('repackage_location_id');
+    const locationId = locSel ? locSel.value : '';
+
+    if (!locationId) {
+      updateRepackageProductOnHand();
+      return;
+    }
+
+    if (locInventoryCache[locationId]) {
+      updateRepackageProductOnHand();
+      return;
+    }
+
+    const out = document.getElementById('repackageProductOnHand');
+    if (out) {
+      out.textContent = 'Loading on-hand quantity…';
+      out.style.color = '#94a3b8';
+    }
+
+    fetch(`/api/location_inventory/${encodeURIComponent(locationId)}`)
+      .then(r => r.json())
+      .then(data => {
+        locInventoryCache[locationId] = data;
+        updateRepackageProductOnHand();
+      })
+      .catch(() => {
+        if (out) {
+          out.textContent = 'Could not load on-hand quantity for this location.';
+          out.style.color = '#94a3b8';
+        }
+      });
+  }
+
+  function updateRepackageProductOnHand() {
+    const locSel = document.getElementById('repackage_location_id');
+    const prodSel = document.getElementById('repackage_product_id');
+    const out = document.getElementById('repackageProductOnHand');
+    if (!locSel || !prodSel || !out) return;
+
+    if (window.repackageMode === 'bulk') recalcRepackageBulkMode();
+
+    const locationId = locSel.value;
+    const productId = prodSel.value;
+
+    if (!locationId) {
+      out.textContent = 'Select a location and product to see on-hand quantity.';
+      out.style.color = '#94a3b8';
+      return;
+    }
+    if (!productId) {
+      out.textContent = 'Select a product to see on-hand quantity at this location.';
+      out.style.color = '#94a3b8';
+      return;
+    }
+
+    const data = locInventoryCache[locationId];
+    if (!data) {
+      out.textContent = 'Loading on-hand quantity…';
+      out.style.color = '#94a3b8';
+      return;
+    }
+
+    const prod = (data.products || []).find(p => String(p.product_id) === String(productId));
+    if (!prod) {
+      out.textContent = 'No inventory for this product at the selected location.';
+      out.style.color = '#94a3b8';
+      return;
+    }
+
+    const fmt = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    const qty = prod.bulk_qty || 0;
+
+    const gal = convertQtyForDisplay(qty, prod.unit, prod.weight, 'gal');
+    const lb  = convertQtyForDisplay(qty, prod.unit, prod.weight, 'lb');
+
+    if (gal === null && lb === null) {
+      // 'unit'-tracked product (or missing weight) — no gal/lb equivalent,
+      // fall back to showing it in its own native unit.
+      out.textContent = `On hand: ${fmt(qty)} ${(prod.unit || '').toUpperCase()}`;
+    } else {
+      const galText = gal !== null ? `${fmt(gal)} GAL` : '—';
+      const lbText  = lb  !== null ? `${fmt(lb)} LB`  : '—';
+      out.textContent = `On hand: ${galText}  •  ${lbText}`;
+    }
+    out.style.color = '#374151';
+  }
+</script>
+
+<script>
+  // ── Blend tab ──
+  const BLEND_PRODUCTS = [
+    {% for p in products %}
+      { id: {{ p['id'] | tojson }}, name: {{ p['name'] | tojson }} },
+    {% endfor %}
+  ];
+
+  const BLEND_FORMULAS = {{ (formulas or []) | tojson }};
+
+  const BLEND_PRODUCT_NAME_BY_ID = {};
+  BLEND_PRODUCTS.forEach(p => { BLEND_PRODUCT_NAME_BY_ID[String(p.id)] = p.name; });
+
+  function blendProductName(pid) {
+    return BLEND_PRODUCT_NAME_BY_ID[String(pid)] || pid || '—';
+  }
+
+  window.blendCompMode = 'percent';
+
+  function buildBlendProductOptionsHTML() {
+    return BLEND_PRODUCTS.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  }
+
+  function setBlendSubMode(sub) {
+    document.getElementById('blendSubBtnCustom').classList.toggle('active', sub === 'custom');
+    document.getElementById('blendSubBtnFormula').classList.toggle('active', sub === 'formula');
+    document.getElementById('blendCustomFields').style.display = sub === 'custom' ? 'block' : 'none';
+    document.getElementById('blendFormulaFields').style.display = sub === 'formula' ? 'block' : 'none';
+    document.getElementById('blendModeField').value = sub;
+    updateBlendPreview();
+  }
+
+  function setBlendCompMode(mode) {
+    window.blendCompMode = mode;
+    document.querySelectorAll('.blend-amt-percent').forEach(el => {
+      el.style.display = mode === 'percent' ? 'block' : 'none';
+    });
+    document.querySelectorAll('.blend-amt-qtywrap').forEach(el => {
+      el.style.display = mode === 'absolute' ? 'flex' : 'none';
+    });
+    document.getElementById('blendPercentSumWrap').style.display = mode === 'percent' ? 'inline' : 'none';
+    document.getElementById('blendAbsSumWrap').style.display = mode === 'absolute' ? 'inline' : 'none';
+    updateBlendSums();
+    updateBlendPreview();
+  }
+
+  function addBlendIngRow() {
+    const wrap = document.getElementById('blend-ing-rows');
+    if (!wrap) return;
+    const mode = window.blendCompMode || 'percent';
+
+    const row = document.createElement('div');
+    row.className = 'blend-ing-row';
+    row.innerHTML = `
+      <div>
+        <label>Product</label>
+        <select name="product_id[]">
+          <option value="" disabled selected>Select product…</option>
+          ${buildBlendProductOptionsHTML()}
+        </select>
+      </div>
+      <div>
+        <label>Amount</label>
+        <div style="display:flex; gap:8px;">
+          <input type="number" step="any" min="0" name="percent[]" class="blend-amt-percent"
+                 placeholder="e.g., 50 (%)" style="${mode === 'percent' ? '' : 'display:none'}">
+          <div class="blend-amt-qtywrap" style="display:${mode === 'absolute' ? 'flex' : 'none'}; gap:8px; flex:1;">
+            <input type="number" step="any" min="0" name="qty[]" placeholder="Qty">
+            <select name="qty_unit[]" style="flex:0 0 90px;">
+              <option value="gal">GAL</option>
+              <option value="lb">LB</option>
+              <option value="unit">UNIT</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; padding-bottom:2px;">
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeBlendIngRow(this)">Remove</button>
+      </div>
+    `;
+    wrap.appendChild(row);
+    row.querySelectorAll('input,select').forEach(x => {
+      x.addEventListener('input', () => { updateBlendSums(); updateBlendPreview(); });
+      x.addEventListener('change', () => { updateBlendSums(); updateBlendPreview(); });
+    });
+    updateBlendSums();
+    updateBlendPreview();
+  }
+
+  function removeBlendIngRow(btn) {
+    const row = btn.closest('.blend-ing-row');
+    if (row) row.remove();
+    updateBlendSums();
+    updateBlendPreview();
+  }
+
+  function updateBlendSums() {
+    const mode = window.blendCompMode || 'percent';
+    const targetUnit = document.getElementById('blendTargetUnit')?.value || 'gal';
+
+    if (mode === 'percent') {
+      let sum = 0;
+      document.querySelectorAll('#blend-ing-rows .blend-amt-percent').forEach(inp => {
+        sum += parseFloat(inp.value || '0') || 0;
+      });
+      const el = document.getElementById('blendPercentSum');
+      if (el) el.textContent = sum.toFixed(2);
+    } else {
+      let sum = 0;
+      document.querySelectorAll('#blend-ing-rows .blend-ing-row').forEach(row => {
+        const qty = parseFloat(row.querySelector('input[name="qty[]"]')?.value || '0') || 0;
+        const unit = row.querySelector('select[name="qty_unit[]"]')?.value || 'gal';
+        if (unit === targetUnit) sum += qty;
+      });
+      const el = document.getElementById('blendAbsSum');
+      const unitEl = document.getElementById('blendAbsSumUnit');
+      if (el) el.textContent = sum.toFixed(2);
+      if (unitEl) unitEl.textContent = targetUnit.toUpperCase();
+    }
+  }
+
+  // Renders the "Products used in this blend" preview, right above the
+  // packaging section. Recomputes from whichever sub-mode is active.
+  function fmtBlendQty(n) {
+    const v = Number(n);
+    if (!isFinite(v)) return '—';
+    return v.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  }
+
+  function renderBlendPreviewRows(rows, emptyMsg) {
+    const wrap = document.getElementById('blendPreviewList');
+    if (!wrap) return;
+    if (!rows || !rows.length) {
+      wrap.innerHTML = `<div class="loc-empty" style="min-height:56px;">${emptyMsg}</div>`;
+      return;
+    }
+    wrap.innerHTML = rows.map(r => `
+      <div class="blend-preview-row${r.warn ? ' bp-warn' : ''}">
+        <span class="bp-name">${r.name}</span>
+        <span class="bp-qty">${r.qtyLabel}</span>
+      </div>
+    `).join('');
+  }
+
+  function updateBlendPreview() {
+    const subCustomActive = document.getElementById('blendCustomFields').style.display !== 'none';
+
+    if (subCustomActive) {
+      const targetQty = parseFloat(document.getElementById('blendTargetQty')?.value || '0') || 0;
+      const targetUnit = (document.getElementById('blendTargetUnit')?.value || 'gal').toUpperCase();
+      const mode = window.blendCompMode || 'percent';
+
+      const rows = [];
+      document.querySelectorAll('#blend-ing-rows .blend-ing-row').forEach(row => {
+        const prodSel = row.querySelector('select[name="product_id[]"]');
+        const pid = prodSel ? prodSel.value : '';
+        if (!pid) return;
+        const name = blendProductName(pid);
+
+        if (mode === 'percent') {
+          const pct = parseFloat(row.querySelector('.blend-amt-percent')?.value || '0') || 0;
+          if (pct <= 0) return;
+          if (targetQty > 0) {
+            const used = targetQty * (pct / 100);
+            rows.push({ name, qtyLabel: `${fmtBlendQty(used)} ${targetUnit}` });
+          } else {
+            rows.push({ name, qtyLabel: `${fmtBlendQty(pct)}%`, warn: true });
+          }
+        } else {
+          const qty = parseFloat(row.querySelector('input[name="qty[]"]')?.value || '0') || 0;
+          const unit = (row.querySelector('select[name="qty_unit[]"]')?.value || 'gal').toUpperCase();
+          if (qty <= 0) return;
+          rows.push({ name, qtyLabel: `${fmtBlendQty(qty)} ${unit}` });
+        }
+      });
+
+      renderBlendPreviewRows(rows, 'Add ingredients (or pick a formula + batch size) to see quantities.');
+    } else {
+      const formulaId = document.getElementById('blendFormulaSelect')?.value || '';
+      const batchQty = parseFloat(document.getElementById('blendBatchQty')?.value || '0') || 0;
+      const batchUnit = (document.getElementById('blendBatchUnit')?.value || 'gal');
+
+      const formula = BLEND_FORMULAS.find(f => String(f.id) === String(formulaId));
+      if (!formula || !batchQty) {
+        renderBlendPreviewRows([], 'Add ingredients (or pick a formula + batch size) to see quantities.');
+        return;
+      }
+
+      const fMode = (formula.mode || 'percent').toLowerCase();
+      const comps = Array.isArray(formula.components) ? formula.components : [];
+      const rows = [];
+
+      if (fMode === 'percent') {
+        comps.forEach(c => {
+          const pct = Number(c.percent || 0);
+          if (pct <= 0) return;
+          const used = batchQty * (pct / 100);
+          rows.push({ name: blendProductName(c.product_id), qtyLabel: `${fmtBlendQty(used)} ${batchUnit.toUpperCase()}` });
+        });
+      } else {
+        const sameUnitComps = comps.filter(c => (c.qty_unit || '').toLowerCase() === batchUnit.toLowerCase());
+        const totalInUnit = sameUnitComps.reduce((acc, c) => acc + Number(c.qty || 0), 0);
+        const scale = totalInUnit > 0 ? (batchQty / totalInUnit) : 0;
+
+        comps.forEach(c => {
+          const cUnit = (c.qty_unit || batchUnit).toLowerCase();
+          const baseQty = Number(c.qty || 0);
+          if (baseQty <= 0) return;
+          if (cUnit === batchUnit.toLowerCase() && scale > 0) {
+            rows.push({ name: blendProductName(c.product_id), qtyLabel: `${fmtBlendQty(baseQty * scale)} ${batchUnit.toUpperCase()}` });
+          } else {
+            rows.push({ name: blendProductName(c.product_id), qtyLabel: `${fmtBlendQty(baseQty)} ${cUnit.toUpperCase()} (formula unit)`, warn: true });
+          }
+        });
+      }
+
+      renderBlendPreviewRows(rows, 'Select a formula and enter a batch quantity to see quantities.');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const formulaSel = document.getElementById('blendFormulaSelect');
+    const batchQtyEl = document.getElementById('blendBatchQty');
+    const batchUnitEl = document.getElementById('blendBatchUnit');
+    [formulaSel, batchQtyEl, batchUnitEl].forEach(el => {
+      if (!el) return;
+      el.addEventListener('input', updateBlendPreview);
+      el.addEventListener('change', updateBlendPreview);
+    });
+  });
+
+  // Seed two empty ingredient rows to start
+  addBlendIngRow();
+  addBlendIngRow();
+  updateBlendPreview();
+</script>
+
+<script>
+  // ── Remove tab: bulk vs. package-type mode ──
+  window.REMOVE_PKG_AVAIL = {};
+
+  function updateRemoveMode() {
+    const checked = document.querySelector('input[name="remove_mode_radio"]:checked');
+    const mode = checked ? checked.value : 'bulk';
+    document.getElementById('remove_mode_hidden').value = mode;
+
+    const bulkFields = document.getElementById('removeBulkFields');
+    const pkgFields = document.getElementById('removePkgFields');
+    const qtyInput = document.querySelector('#panelRemove input[name="qty"]');
+    const unitSelect = document.querySelector('#panelRemove select[name="unit"]');
+
+    if (mode === 'package') {
+      bulkFields.style.display = 'none';
+      pkgFields.style.display = 'block';
+      if (qtyInput) qtyInput.required = false;
+      if (unitSelect) unitSelect.required = false;
+
+      refreshRemovePkgAvailability();
+    } else {
+      bulkFields.style.display = 'flex';
+      pkgFields.style.display = 'none';
+      if (qtyInput) qtyInput.required = true;
+      if (unitSelect) unitSelect.required = true;
+    }
+  }
+
+  function refreshRemovePkgAvailability() {
+    const prodSel = document.querySelector('#panelRemove select[name="product_id"]');
+    const noteEl = document.getElementById('removePkgAvailNote');
+    const pid = prodSel ? prodSel.value : '';
+
+    if (!pid) {
+      window.REMOVE_PKG_AVAIL = {};
+      if (noteEl) noteEl.textContent = 'Select a product to see packaged quantities on hand.';
+      rerenderRemovePkgSelects();
+      return;
+    }
+
+    if (noteEl) noteEl.textContent = 'Loading packaged quantities…';
+
+    fetch(`/api/package_inventory/${encodeURIComponent(pid)}`)
+      .then(r => r.json())
+      .then(data => {
+        const map = {};
+        (data.packaged || []).forEach(p => { map[p.package_id] = p.quantity; });
+        window.REMOVE_PKG_AVAIL = map;
+
+        if (noteEl) {
+          const parts = (data.packaged || [])
+            .filter(p => p.quantity > 0)
+            .map(p => `${p.quantity}× ${p.package_name}`);
+          noteEl.textContent = parts.length
+            ? `On hand: ${parts.join(', ')}`
+            : 'No packaged inventory on hand for this product.';
+        }
+        rerenderRemovePkgSelects();
+      })
+      .catch(() => {
+        if (noteEl) noteEl.textContent = 'Could not load packaged quantities.';
+      });
+  }
+
+  function rerenderRemovePkgSelects() {
+    rerenderPkgSelects('pkg-rows-remove');
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const prodSel = document.querySelector('#panelRemove select[name="product_id"]');
+    if (prodSel) prodSel.addEventListener('change', refreshRemovePkgAvailability);
+  });
+</script>
+
+<script>
+  function showTab(which) {
+    const rec = document.getElementById('panelReceive');
+    const rem = document.getElementById('panelRemove');
+    const mov = document.getElementById('panelMove');
+    const rep = document.getElementById('panelRepackage');
+    const bln = document.getElementById('panelBlend');
+
+    const tabRec = document.getElementById('tabReceive');
+    const tabRem = document.getElementById('tabRemove');
+    const tabMov = document.getElementById('tabMove');
+    const tabRep = document.getElementById('tabRepackage');
+    const tabBln = document.getElementById('tabBlend');
+
+    rec.style.display = 'none';
+    rem.style.display = 'none';
+    mov.style.display = 'none';
+    rep.style.display = 'none';
+    bln.style.display = 'none';
+
+    tabRec.classList.remove('active');
+    tabRem.classList.remove('active');
+    tabMov.classList.remove('active');
+    tabRep.classList.remove('active');
+    tabBln.classList.remove('active');
+
+    if (which === 'remove') {
+      rem.style.display = 'block';
+      tabRem.classList.add('active');
+    } else if (which === 'move') {
+      mov.style.display = 'block';
+      tabMov.classList.add('active');
+    } else if (which === 'repackage') {
+      rep.style.display = 'block';
+      tabRep.classList.add('active');
+    } else if (which === 'blend') {
+      bln.style.display = 'block';
+      tabBln.classList.add('active');
+    } else {
+      rec.style.display = 'block';
+      tabRec.classList.add('active');
+    }
+
+    window.activeAdjustTab = which;
+  }
+
+  showTab('receive');
+</script>
+
+{% endblock %}

@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<!-- Header -->
+<h2 class="section-title" style="margin-top: -6px;">
+    Inventory Overview
+</h2>
+
+
+<!-- KPI Row -->
+<div class="kpi-row">
+
+{% if can('costs') %}
+  <!-- Inventory Value -->
+  <div class="kpi-card">
+    <div class="kpi-label text-uppercase text-muted mb-1" style="font-size: .75rem;">
+      Inventory Value
+    </div>
+    <div class="kpi-value">
+      ${{ "%.2f"|format(kpis.total_value) }}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Qty on Hand -->
+  <div class="kpi-card">
+    <div class="kpi-label text-uppercase text-muted mb-1" style="font-size: .75rem;">
+      Qty on Hand
+    </div>
+    <div class="kpi-value">
+      {{ kpis.total_gallons | round(1) }} <span class="fs-6 text-muted">GAL</span>
+    </div>
+    <div class="mt-1" style="font-size: .9rem; color: #64748b;">
+      {{ kpis.total_pounds | round(1) }} <span class="text-muted">LB</span>
+    </div>
+  </div>
+
+  <!-- Reorder Alerts -->
+  <div class="kpi-card">
+    <div class="kpi-value">
+      {% if alerts_triggered is defined and alerts_total is defined %}
+        {{ alerts_triggered }} / {{ alerts_total }}
+      {% else %}
+        —
+      {% endif %}
+    </div>
+    <div class="kpi-label">Reorder Alerts Triggered</div>
+  </div>
+
+  <!-- Product Count -->
+  <div class="kpi-card">
+    <div class="kpi-value">
+      {{ product_count if product_count is defined else "0" }}
+    </div>
+    <div class="kpi-label">Product Count</div>
+  </div>
+
+</div>
+
+<!-- PRODUCT PREVIEW TABLE -->
+<div class="card section-card shadow-sm mt-3">
+  {% if items is defined and items|length %}
+    <div class="card-header d-flex justify-content-between align-items-center bg-white">
+      <span class="fw-semibold">Top Products by Qty On Hand</span>
+      <span class="text-muted small">
+        Showing {{ items|length }} of {{ product_count }} products
+      </span>
+    </div>
+
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Name</th>
+              <th>Default Unit</th>
+              <th class="text-nowrap">Qty</th>
+              <th class="text-nowrap">Gallons</th>
+              <th class="text-nowrap">Pounds</th>
+{% if can('costs') %}<th class="text-nowrap">Inv. Value</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in items %}
+              {% set p = it.raw %}
+              {% set a = alerts_by_pid.get(p.id) if alerts_by_pid is defined else None %}
+              {% set status = (a.status if a is not none else None) %}
+              {% set row_class =
+                  'table-danger' if status == 'critical'
+                  else ('table-warning' if status == 'warning'
+                  else ('table-success' if status == 'ok'
+                  else ''))
+              %}
+
+              <tr class="{{ row_class }}">
+                <td class="fw-semibold">
+                  <a class="text-decoration-none"
+                     href="{{ url_for('product_detail', product_id=p.id) }}">
+                    {{ p.name }}
+                  </a>
+                </td>
+                <td>
+                  <span class="badge badge-soft rounded-pill">
+                    {{ (p.default_unit or '').upper() }}
+                  </span>
+                </td>
+                <td class="font-monospace">
+                  {{ p.quantity }}
+                  {% if status in ['ok','warning','critical'] %}
+                    <span class="ms-1 small text-muted">• alert</span>
+                  {% endif %}
+                </td>
+
+                <td class="font-monospace">
+                  {{ it.gallons if it.gallons is not none else '' }}
+                </td>
+                <td class="font-monospace">
+                  {{ it.pounds if it.pounds is not none else '' }}
+                </td>
+
+{% if can('costs') %}
+                <td class="font-monospace">
+                  {{ it.inventory_value }}
+                </td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card-footer bg-white border-0 d-flex justify-content-end">
+      <a href="{{ url_for('list_products') }}" class="btn btn-sm btn-outline-secondary">
+        More...
+      </a>
+    </div>
+
+  {% else %}
+    <div class="card-body d-flex justify-content-between align-items-center">
+      <div class="text-muted">
+        Product list preview will show here once inventory is added.
+      </div>
+      <a href="{{ url_for('add_product') }}" class="btn btn-sm btn-primary">
+        + Add Product
+      </a>
+    </div>
+  {% endif %}
+</div>
+
+<!-- SEARCH CARD -->
+<div class="card section-card shadow-sm mt-3">
+  <div class="card-header bg-white">
+    <span class="fw-semibold">Search Products</span>
+  </div>
+
+  <div class="card-body">
+    <form action="{{ url_for('product_search') }}" method="get" class="d-flex gap-2">
+      <input
+        type="text"
+        name="q"
+        class="form-control"
+        placeholder="Search products..."
+        required
+      >
+      <button class="btn btn-primary btn-sm" type="submit">Search</button>
+    </form>
+  </div>
+</div>
+
+<!-- QUICK ADJUST -->
+<div class="card section-card shadow-sm mt-3">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">Quick Adjust</span>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inventory_adjust_page') }}">
+      Full Adjust Page
+    </a>
+  </div>
+
+  <div class="card-body">
+    <form
+      method="POST"
+      action="{{ url_for('inventory_adjust_page') }}"
+      class="row g-2"
+      onsubmit="return handleQuickAdjustSubmit(this);"
+    >
+      <input type="hidden" name="next" value="{{ url_for('inventory_overview') }}">
+      <input type="hidden" name="stage" value="no">
+
+      <div class="col-12 col-md-5">
+        <label class="form-label mb-1">Product</label>
+        <select class="form-select" name="product_id" required>
+          <option value="" selected disabled>Select a product…</option>
+          {% for p in products %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Action</label>
+        <select class="form-select" name="action" required onchange="toggleCostField(this)">
+          <option value="add">Add</option>
+          <option value="remove">Remove</option>
+        </select>
+      </div>
+
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Unit</label>
+        <select class="form-select" name="unit" required>
+          <option value="gal">GAL</option>
+          <option value="lb">LB</option>
+          <option value="unit">UNIT</option>
+        </select>
+      </div>
+
+      <div class="col-6 col-md-1">
+        <label class="form-label mb-1">Qty</label>
+        <input class="form-control" type="number" name="qty" step="0.01" min="0" required>
+      </div>
+      
+      <div class="col-12 col-md-4">
+        <label class="form-label mb-1">Location *</label>
+        <select class="form-select" name="location_id" required>
+          <option value="" selected disabled>Select a location…</option>
+          {% for loc in locations %}
+            <option value="{{ loc['id'] }}">{{ loc['name'] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+
+      <div class="col-6 col-md-2" id="costField">
+        <label class="form-label mb-1">Cost / Unit</label>
+        <input
+          class="form-control"
+          type="number"
+          name="receive_unit_cost"
+         step="0.0001"
+          min="0"
+          placeholder="1.85"
+          required
+        >
+      </div>
+
+      <div class="col-12">
+        <label class="form-label mb-1">Notes (optional)</label>
+        <input class="form-control" type="text" name="notes" placeholder="e.g., received shipment, sold to customer">
+      </div>
+
+      <div class="col-12 d-flex justify-content-end gap-2 mt-1">
+        <button class="btn btn-primary btn-sm" type="submit">Apply</button>
+        <button class="btn btn-outline-secondary btn-sm" type="reset">Clear</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="text-center text-muted mt-3">
+  <small>Inventory overview • NStock</small>
+</div>
+
+<script>
+function toggleCostField(actionSelect) {
+  const form = actionSelect.closest("form");
+  const costWrap = form.querySelector("#costField");
+  const costInput = form.querySelector('input[name="receive_unit_cost"]');
+
+  if (actionSelect.value === "add") {
+    costWrap.style.display = "";
+    costInput.required = true;
+  } else {
+    costWrap.style.display = "none";
+    costInput.required = false;
+    costInput.value = "";
+  }
+}
+
+function handleQuickAdjustSubmit(form) {
+  const action = form.querySelector('select[name="action"]').value;
+  const stageInput = form.querySelector('input[name="stage"]');
+
+  if (action === "remove") {
+  const ok = confirm(
+    "Stage this removal?\n\nOK = Yes (stage)\nCancel = No (remove immediately)"
+  );
+  stageInput.value = ok ? "yes" : "no";
+  }
+
+
+  return true;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const actionSelect = document.querySelector('select[name="action"]');
+  if (actionSelect) toggleCostField(actionSelect);
+});
+</script>
+
+{% endblock %}
+
+<!-- Modified by Cesar Salas DEC 12 2025 -->

@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<h2 class="section-title" style="margin-top: -6px;">
+  Edit Location
+</h2>
+
+{% if errors %}
+  <ul class="errors">
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+<div class="card section-card shadow-sm">
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('edit_location', location_id=location.id) }}">
+
+      <div class="row-form">
+        <label for="name">Location Name *</label>
+        <input
+          id="name"
+          name="name"
+          type="text"
+          value="{{ (form.get('name') if form else '') or location.name }}"
+          required
+        >
+      </div>
+
+      <div class="row-form">
+        <label for="address">Address</label>
+        <textarea
+          id="address"
+          name="address"
+          rows="3"
+        >{{ (form.get('address') if form else '') or (location.address or '') }}</textarea>
+      </div>
+
+      <div style="height:1px; background:#e5e7eb; margin:14px 0;"></div>
+
+      <!-- Existing tanks -->
+      <div class="row-form" style="align-items:flex-end;">
+        <div>
+          <div style="font-weight:700;">Tanks</div>
+          <div class="text-muted" style="font-size:.85rem; margin-top:4px;">
+            Edit name/capacity/notes. Capacity cannot be below current fill.
+          </div>
+        </div>
+      </div>
+
+      <div id="tank-edit" style="margin-top:8px;">
+
+        {% if tanks and tanks|length > 0 %}
+          {% for t in tanks %}
+            <div class="tank-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
+              <div class="line-row" style="display:grid; grid-template-columns: 1.2fr 0.6fr 1.2fr; gap:12px; align-items:end;">
+
+                <input type="hidden" name="tank_id[]" value="{{ t.id }}">
+
+                <div>
+                  <label>Tank Name</label>
+                  <input name="tank_name[]" type="text" value="{{ t.name }}">
+                </div>
+
+                <div>
+                  <label>Capacity (gal)</label>
+                  <input name="tank_capacity_gal[]" type="number" step="0.01" inputmode="decimal" value="{{ t.capacity_gal }}">
+                </div>
+
+                <div>
+                  <label>Notes</label>
+                  <input name="tank_notes[]" type="text" value="{{ t.notes or '' }}">
+                </div>
+
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted" style="font-size:.9rem; margin-bottom:10px;">
+            No tanks yet.
+          </div>
+        {% endif %}
+
+      </div>
+
+      <div style="height:1px; background:#e5e7eb; margin:14px 0;"></div>
+
+      <!-- Add new tanks -->
+      <div class="row-form" style="align-items:flex-end;">
+        <div>
+          <div style="font-weight:700;">Add new tanks (optional)</div>
+          <div class="text-muted" style="font-size:.85rem; margin-top:4px;">
+            Leave blank rows empty.
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addNewTank()">
+          + Add Tank
+        </button>
+      </div>
+
+      <div id="new-tanks" style="margin-top:8px;">
+        <div class="tank-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
+          <div class="line-row" style="display:grid; grid-template-columns: 1.2fr 0.6fr 1.2fr auto; gap:12px; align-items:end;">
+
+            <div>
+              <label>Tank Name</label>
+              <input name="new_tank_name[]" type="text" placeholder="e.g., Tank B">
+            </div>
+
+            <div>
+              <label>Capacity (gal)</label>
+              <input name="new_tank_capacity_gal[]" type="number" step="0.01" inputmode="decimal" placeholder="7500">
+            </div>
+
+            <div>
+              <label>Notes</label>
+              <input name="new_tank_notes[]" type="text" placeholder="optional">
+            </div>
+
+            <div style="display:flex; justify-content:flex-end;">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeNewTank(this)">
+                Remove
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="row-form" style="justify-content:flex-end; gap:8px;">
+        <a href="{{ url_for('location_detail_by_id', location_id=location.id) }}" class="btn btn-outline-secondary btn-sm">
+          Cancel
+        </a>
+        <button class="btn btn-primary btn-sm" type="submit">
+          Save Changes
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<script>
+  function newTankTemplate() {
+    return `
+      <div class="tank-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
+        <div class="line-row" style="display:grid; grid-template-columns: 1.2fr 0.6fr 1.2fr auto; gap:12px; align-items:end;">
+
+          <div>
+            <label>Tank Name</label>
+            <input name="new_tank_name[]" type="text" placeholder="e.g., Tank B">
+          </div>
+
+          <div>
+            <label>Capacity (gal)</label>
+            <input name="new_tank_capacity_gal[]" type="number" step="0.01" inputmode="decimal" placeholder="7500">
+          </div>
+
+          <div>
+            <label>Notes</label>
+            <input name="new_tank_notes[]" type="text" placeholder="optional">
+          </div>
+
+          <div style="display:flex; justify-content:flex-end;">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeNewTank(this)">
+              Remove
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+  }
+
+  function addNewTank() {
+    const wrap = document.getElementById('new-tanks');
+    wrap.insertAdjacentHTML('afterbegin', newTankTemplate());
+  }
+
+  function removeNewTank(btn) {
+    const row = btn.closest('.tank-row');
+    if (!row) return;
+
+    const wrap = document.getElementById('new-tanks');
+    const cards = wrap.querySelectorAll('.tank-row');
+
+    if (cards.length <= 1) {
+      row.querySelectorAll('input').forEach(el => el.value = '');
+      return;
+    }
+    row.remove();
+  }
+</script>
+
+{% endblock %}

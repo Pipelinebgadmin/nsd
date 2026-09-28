@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<h2 class="section-title" style="margin-top: -6px;">
+  Receive Inventory (Tanks Optional)
+</h2>
+
+{% if errors %}
+  <ul class="errors">
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+<div class="card section-card shadow-sm">
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('inventory_receive_page') }}">
+
+      <div class="row-form">
+        <label for="product_id">Product *</label>
+        {% set pid = form.get('product_id','') %}
+        <select id="product_id" name="product_id" required>
+          <option value="" disabled {% if not pid %}selected{% endif %}>Select a product</option>
+          {% for p in products %}
+            <option value="{{ p['id'] }}" {% if pid|string == p['id']|string %}selected{% endif %}>
+              {{ p['name'] }} — on hand: {{ p.get('quantity',0) }} {{ p.get('default_unit','') }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="row-form">
+        <label for="qty">Quantity Received *</label>
+        <input id="qty" name="qty" type="number" step="0.0001" min="0"
+               value="{{ form.get('qty','') }}" required>
+      </div>
+
+      <div class="row-form">
+        <label for="unit">Unit *</label>
+        {% set u = (form.get('unit','gal') or 'gal') %}
+        <select id="unit" name="unit" required>
+          <option value="gal" {% if u == 'gal' %}selected{% endif %}>GAL</option>
+          <option value="lb"  {% if u == 'lb'  %}selected{% endif %}>LB</option>
+        </select>
+        <div class="text-muted" style="font-size:.85rem; margin-top:4px;">
+          Tanks are liquid storage, so receive here supports GAL or LB only.
+        </div>
+      </div>
+
+      <div class="row-form">
+        <label for="receive_unit_cost">Cost per unit *</label>
+        <input id="receive_unit_cost" name="receive_unit_cost" type="number" step="0.0001" min="0"
+               value="{{ form.get('receive_unit_cost','') }}" required>
+      </div>
+
+      <div class="row-form">
+        <label for="location_id">Location *</label>
+        {% set lid = form.get('location_id','') %}
+        <select id="location_id" name="location_id" required onchange="onLocationChange()">
+          <option value="" disabled {% if not lid %}selected{% endif %}>Select a location</option>
+          {% for loc in locations %}
+            <option value="{{ loc.get('id') }}" {% if lid|string == loc.get('id')|string %}selected{% endif %}>
+              {{ loc.get('name') }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="row-form">
+        <label for="tank_id">Tank (optional)</label>
+        {% set tid = form.get('tank_id','') %}
+        <select id="tank_id" name="tank_id">
+          <option value="" {% if not tid %}selected{% endif %}>No tank (store at location level)</option>
+        </select>
+      </div>
+
+      <div class="row-form">
+        <label for="ref">Reference</label>
+        <input id="ref" name="ref" type="text" value="{{ form.get('ref','') }}"
+               placeholder="PO / BOL / Ticket # (optional)">
+      </div>
+
+      <div class="row-form">
+        <label for="notes">Notes</label>
+        <input id="notes" name="notes" type="text" value="{{ form.get('notes','') }}">
+      </div>
+
+      <div class="row-form" style="justify-content:flex-end; gap:8px;">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary btn-sm">
+          Back
+        </a>
+        <button class="btn btn-primary btn-sm" type="submit">
+          Receive
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<script>
+  const TANKS_BY_LOC = {{ tanks_by_loc | tojson }};
+
+  function buildTankOptions(locationId, selectedTankId) {
+    const tankSelect = document.getElementById("tank_id");
+    tankSelect.innerHTML = "";
+
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "No tank (store at location level)";
+    tankSelect.appendChild(opt0);
+
+    const tanks = TANKS_BY_LOC[String(locationId)] || [];
+    for (const t of tanks) {
+      const opt = document.createElement("option");
+      opt.value = t.id;
+      opt.textContent = `${t.name} — ${t.capacity_gal} GAL`;
+      tankSelect.appendChild(opt);
+    }
+
+    tankSelect.value = selectedTankId || "";
+  }
+
+  function onLocationChange() {
+    const lid = document.getElementById("location_id").value;
+    buildTankOptions(lid, "");
+  }
+
+  (function init() {
+    const lid = "{{ form.get('location_id','') }}";
+    const tid = "{{ form.get('tank_id','') }}";
+    if (lid) buildTankOptions(lid, tid);
+  })();
+</script>
+
+{% endblock %}

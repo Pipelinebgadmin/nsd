@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .container,.container-sm,.container-md,.container-lg,.container-xl,.container-xxl,.container-fluid{
+    max-width:100% !important;width:100% !important;margin-left:0 !important;margin-right:0 !important;
+    padding-left:1.25rem !important;padding-right:1.25rem !important;
+  }
+  .page-title{font-weight:600;}
+  .text-muted-small{color:#6c757d;font-size:.9rem;}
+</style>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2" style="margin-top:-6px;">
+  <h2 class="section-title">Blend Instruction</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('reports_center') }}">&larr; Report Center</a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header bg-white">Choose a Formula</div>
+  <div class="card-body">
+    <form class="row gy-2 gx-2 align-items-end" method="get" action="{{ url_for('report_blend_instruction') }}">
+      <div class="col-12 col-md-6">
+        <select class="form-select" name="formula_id" onchange="this.form.submit()">
+          {% for f in formulas %}
+            <option value="{{ f.id }}" {% if formula and f.id==formula.id %}selected{% endif %}>{{ f.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-2">
+        <button class="btn btn-primary btn-sm w-100" type="submit">View</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if formula %}
+<div class="d-flex justify-content-end mb-3">
+  <a class="btn btn-sm btn-success" href="{{ url_for('report_blend_instruction_pdf', formula_id=formula.id) }}">
+    Download PDF
+  </a>
+</div>
+
+<div class="card">
+  <div class="card-header bg-white fw-semibold">{{ formula.name }}</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Component</th>
+            <th class="text-end">Percent</th>
+            <th class="text-end">Qty for 100 gal batch</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in formula.components %}
+            {% set p = products_by_id.get(c.product_id|string) %}
+          <tr>
+            <td>{{ p.name if p else c.product_id }}</td>
+            <td class="text-end">{{ '%.2f'|format(c.percent) }}%</td>
+            <td class="text-end">{{ '%.2f'|format(c.percent) }} gal</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% if formula.description %}
+  <div class="card-body border-top">
+    <div class="fw-semibold mb-1">Notes</div>
+    <div>{{ formula.description }}</div>
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="text-muted p-3">No formulas found. Build one in Blend Builder first.</div>
+{% endif %}
+
+{% endblock %}

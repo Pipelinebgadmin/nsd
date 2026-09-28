@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<h2 class="section-title" style="margin-top: -6px;">
+  New Location
+</h2>
+
+{% if errors %}
+  <ul class="errors">
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+<div class="card section-card shadow-sm">
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('add_location') }}">
+
+      <!-- Row 1: Name -->
+      <div class="row-form">
+        <label for="name">Location Name *</label>
+        <input
+          id="name"
+          name="name"
+          type="text"
+          value="{{ form.get('name','') }}"
+          placeholder="e.g., Midland Yard, Houston Tank Farm"
+          required
+        >
+      </div>
+
+      <!-- Row 2: Address -->
+      <div class="row-form">
+        <label for="address">Address</label>
+        <textarea
+          id="address"
+          name="address"
+          rows="3"
+          placeholder="Street, City, State, ZIP"
+        >{{ form.get('address','') }}</textarea>
+      </div>
+
+      <!-- Divider -->
+      <div style="height:1px; background:#e5e7eb; margin:14px 0;"></div>
+
+      <!-- Tanks (optional) header + button -->
+      <div class="row-form" style="align-items:flex-end;">
+        <div>
+          <div style="font-weight:700;">Add tanks (optional)</div>
+          <div class="text-muted" style="font-size:.85rem; margin-top:4px;">
+            You can create tanks now, even if this location has no inventory yet.
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addTank()">
+          + Add Tank
+        </button>
+      </div>
+
+      <!-- Tanks container -->
+      <div id="tanks" style="margin-top:8px;">
+
+        {# One tank row by default #}
+        <div class="tank-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
+          <div class="line-row" style="display:grid; grid-template-columns: 1.2fr 0.6fr 1.2fr auto; gap:12px; align-items:end;">
+
+            <div>
+              <label>Tank Name</label>
+              <input name="tank_name[]" type="text" placeholder="e.g., Tank A">
+            </div>
+
+            <div>
+              <label>Capacity (gal)</label>
+              <input name="tank_capacity_gal[]" type="number" step="0.01" inputmode="decimal" placeholder="5000">
+            </div>
+
+            <div>
+              <label>Notes</label>
+              <input name="tank_notes[]" type="text" placeholder="optional">
+            </div>
+
+            <div style="display:flex; justify-content:flex-end;">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeTank(this)">
+                Remove
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+<!-- Divider -->
+<div style="height:1px; background:#e5e7eb; margin:14px 0;"></div>
+
+      <!-- Assign Unassigned (optional) header + button -->
+      <div class="row-form" style="align-items:flex-end;">
+        <div>
+          <div style="font-weight:700;">Assign chemicals from Unassigned (optional)</div>
+          <div class="text-muted" style="font-size:.85rem; margin-top:4px;">
+            If you already have inventory in “Unassigned,” you can move some into this new location now.
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addLine()">
+          + Add Chemical
+        </button>
+      </div>
+
+      <!-- Lines container -->
+      <div id="lines" style="margin-top:8px;">
+
+        {# One line by default #}
+        <div class="assign-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
+          <div class="line-row" style="display:grid; grid-template-columns: 1.6fr 0.6fr 0.6fr auto; gap:12px; align-items:end;">
+
+            <div>
+              <label>Chemical</label>
+              <select name="product_id[]" onchange="syncHint(this)">
+                <option value="" selected>— Select from Unassigned —</option>
+                {% for p in unassigned_products %}
+                  <option value="{{ p['id'] }}"
+                          data-avail="{{ p.get('unassigned_qty', 0) }}"
+                          data-unit="{{ p.get('default_unit','') }}">
+                    {{ p['name'] }} (available: {{ p.get('unassigned_qty',0) }} {{ p.get('default_unit','') }})
+                  </option>
+                {% endfor %}
+              </select>
+              <div class="text-muted avail-hint" style="font-size:.85rem; margin-top:4px;">Available: —</div>
+            </div>
+
+            <div>
+              <label>Quantity</label>
+              <input name="qty[]" inputmode="decimal" placeholder="0">
+            </div>
+
+            <div>
+              <label>Unit</label>
+              <select name="unit[]">
+                <option value="gal">GAL</option>
+                <option value="lb">LB</option>
+                <option value="unit">UNIT</option>
+              </select>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end;">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeLine(this)">
+                Remove
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Actions (match add_product.html) -->
+      <div class="row-form" style="justify-content:flex-end; gap:8px;">
+        <a href="{{ url_for('locations_page') }}" class="btn btn-outline-secondary btn-sm">
+          Cancel
+        </a>
+        <button class="btn btn-primary btn-sm" type="submit">
+          Create Location
+        </button>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<div class="text-center text-muted mt-3">
+  <small>Add location • NStock</small>
+</div>
+
+<script>
+  function lineTemplate() {
+    return `
+      <div class="assign-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
+        <div class="line-row" style="display:grid; grid-template-columns: 1.6fr 0.6fr 0.6fr auto; gap:12px; align-items:end;">
+
+          <div>
+            <label>Chemical</label>
+            <select name="product_id[]" onchange="syncHint(this)">
+              <option value="" selected>— Select from Unassigned —</option>
+              {% for p in unassigned_products %}
+                <option value="{{ p['id'] }}"
+                        data-avail="{{ p.get('unassigned_qty', 0) }}"
+                        data-unit="{{ p.get('default_unit','') }}">
+                  {{ p['name'] }} (available: {{ p.get('unassigned_qty',0) }} {{ p.get('default_unit','') }})
+                </option>
+              {% endfor %}
+            </select>
+            <div class="text-muted avail-hint" style="font-size:.85rem; margin-top:4px;">Available: —</div>
+          </div>
+
+          <div>
+            <label>Quantity</label>
+            <input name="qty[]" inputmode="decimal" placeholder="0">
+          </div>
+
+          <div>
+            <label>Unit</label>
+            <select name="unit[]">
+              <option value="gal">GAL</option>
+              <option value="lb">LB</option>
+              <option value="unit">UNIT</option>
+            </select>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end;">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeLine(this)">
+              Remove
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+  }
+
+  function addLine() {
+    const wrap = document.getElementById('lines');
+    wrap.insertAdjacentHTML('beforeend', lineTemplate());
+  }
+
+  function removeLine(btn) {
+    const row = btn.closest('.assign-row');
+    if (!row) return;
+
+    const wrap = document.getElementById('lines');
+    const cards = wrap.querySelectorAll('.assign-row');
+
+    // keep at least one line
+    if (cards.length <= 1) {
+      row.querySelectorAll('select, input').forEach(el => {
+        if (el.tagName === 'SELECT') el.selectedIndex = 0;
+        if (el.tagName === 'INPUT') el.value = '';
+      });
+      row.querySelectorAll('.avail-hint').forEach(h => h.textContent = 'Available: —');
+      return;
+    }
+
+    row.remove();
+  }
+  function tankTemplate() {
+    return `
+      <div class="tank-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
+        <div class="line-row" style="display:grid; grid-template-columns: 1.2fr 0.6fr 1.2fr auto; gap:12px; align-items:end;">
+
+          <div>
+            <label>Tank Name</label>
+            <input name="tank_name[]" type="text" placeholder="e.g., Tank A">
+          </div>
+
+          <div>
+            <label>Capacity (gal)</label>
+            <input name="tank_capacity_gal[]" type="number" step="0.01" inputmode="decimal" placeholder="5000">
+          </div>
+
+          <div>
+            <label>Notes</label>
+            <input name="tank_notes[]" type="text" placeholder="optional">
+          </div>
+
+          <div style="display:flex; justify-content:flex-end;">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeTank(this)">
+              Remove
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+  }
+
+  function addTank() {
+    const wrap = document.getElementById('tanks');
+    wrap.insertAdjacentHTML('afterbegin', tankTemplate());
+  }
+
+  function removeTank(btn) {
+    const row = btn.closest('.tank-row');
+    if (!row) return;
+
+    const wrap = document.getElementById('tanks');
+    const cards = wrap.querySelectorAll('.tank-row');
+
+    // keep at least one tank line
+    if (cards.length <= 1) {
+      row.querySelectorAll('input').forEach(el => el.value = '');
+      return;
+    }
+
+    row.remove();
+  }
+
+  function syncHint(selectEl) {
+    const opt = selectEl.options[selectEl.selectedIndex];
+    const avail = opt?.dataset?.avail;
+    const unit  = opt?.dataset?.unit;
+
+    const card = selectEl.closest('.assign-row');
+    const hint = card ? card.querySelector('.avail-hint') : null;
+
+    if (hint) {
+      if (avail !== undefined && unit !== undefined && opt.value) {
+        hint.textContent = `Available: ${avail} ${unit}`;
+      } else {
+        hint.textContent = 'Available: —';
+      }
+    }
+
+    // auto set unit to default (if present)
+    if (card && unit) {
+      const unitSel = card.querySelector('select[name="unit[]"]');
+      if (unitSel) {
+        const match = Array.from(unitSel.options).find(o => o.value === unit);
+        if (match) unitSel.value = unit;
+      }
+    }
+  }
+</script>
+
+{% endblock %}

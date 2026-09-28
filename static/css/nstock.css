@@ -1,0 +1,338 @@
+/* ============================
+   NSTOCK GLOBAL THEME
+   ============================ */
+
+/* ---- Base layout ---- */
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #f8fafc;              /* light slate bg */
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  color: #0f172a;
+}
+
+/* Main content wrapper (for non-Bootstrap pages using base.html) */
+main {
+  max-width: 1100px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+
+/* ---- Header / top bar (for base.html) ---- */
+
+header {
+  background: #111827;
+  color: #fff;
+  padding: 12px 16px;
+}
+
+header strong {
+  font-weight: 600;
+}
+
+header nav a {
+  color: #fff;
+  text-decoration: none;
+  margin-right: 12px;
+  font-size: 0.9rem;
+}
+
+header nav a:last-child {
+  margin-right: 0;
+}
+
+header nav a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Typographic helpers ---- */
+
+.page-title {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.text-muted-small {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+/* ---- Cards ---- */
+
+:root {
+  --card-radius: 1rem;
+}
+
+.card,
+.section-card {
+  background: #ffffff;
+  border-radius: var(--card-radius);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  border: 1px solid #e2e8f0;
+}
+
+.section-card .card-body {
+  padding: 1rem;
+}
+
+@media (min-width: 992px) {
+  .section-card .card-body {
+    padding: 1.25rem;
+  }
+}
+
+/* For places where you use .card without Bootstrap's padding */
+.card {
+  padding: 16px;
+}
+
+/* ---- Form layout (base.html-style forms) ---- */
+
+.row-form {
+  /* use this class instead of .row if you want the flex form layout */
+  margin-bottom: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.row-form label {
+  width: 220px;
+  font-weight: 600;
+}
+
+.row-form input,
+.row-form select,
+.row-form textarea {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.row-form textarea {
+  min-height: 90px;
+}
+
+/* Generic inputs if you aren't using .row-form */
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* ---- Buttons ---- */
+
+.btn-nstock {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  text-decoration: none;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.btn-nstock.primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.btn-nstock.secondary {
+  background: #374151;
+  border-color: #374151;
+  color: #fff;
+}
+
+.btn-nstock.success {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+
+.btn-nstock.danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
+/* Works nicely on top of Bootstrap .btn classes too */
+.btn-outline-secondary.btn-sm,
+.btn-primary.btn-sm {
+  border-radius: 999px;
+}
+
+/* ---- KPI Row & Cards ---- */
+
+.kpi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.kpi-card {
+  flex: 1 1 calc(25% - 16px); /* 4 per row on large screens */
+  text-align: center;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--card-radius);
+  padding: 16px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+.kpi-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.kpi-label {
+  color: #64748b;
+  font-size: 0.875rem;
+  margin-top: 4px;
+}
+
+@media (max-width: 991.98px) {
+  .kpi-card {
+    flex: 1 1 calc(50% - 16px); /* 2 per row */
+  }
+}
+
+@media (max-width: 575.98px) {
+  .kpi-card {
+    flex: 1 1 100%; /* 1 per row */
+  }
+}
+
+/* ---- Badges, dots, etc. ---- */
+
+.badge-soft {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  font-weight: 500;
+}
+
+.badge-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+/* For column with action buttons in tables */
+.actions-col {
+  width: 320px;
+}
+
+/* ---- Tables ---- */
+
+.table thead th {
+  white-space: nowrap;
+}
+
+/* ---- Error box ---- */
+
+.errors {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
+
+.errors li {
+  margin-left: 18px;
+}
+
+/* ---- Utility ---- */
+
+.bg-card-soft {
+  background: #f9fafb;
+}
+
+.text-slate {
+  color: #334155;
+}
+
+.alert-badge {
+  font-size: 0.60rem;       /* smaller text */
+  padding: 0px 5px;         /* reduce vertical padding */
+  line-height: 1;           /* compress badge height */
+  border-radius: 4px;       /* cleaner/compact shape */
+  display: inline-flex;
+  align-items: center;      /* vertically center text */
+  height: 16px;             /* << THIS prevents tall badge */
+}
+.nav-link.active-tab {
+  border-bottom: 2px solid #0d6efd; /* Primary color underline */
+  font-weight: 600;
+}
+
+.nav-link {
+  padding-bottom: 4px; /* space for underline */
+}
+
+footer {
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #6b7280;
+}
+
+footer .footer-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* ============================
+   ADD LOCATION PAGE (SCOPED)
+   ============================ */
+
+.add-location-page .line-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.6fr 0.6fr auto;
+  gap: 14px;
+  align-items: end;  /* aligns bottoms so remove button isn't floating */
+}
+
+.add-location-page .row.card {
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+  padding: 14px;          /* overrides the global .card padding ONLY in this page */
+}
+
+.add-location-page .btn-mini {
+  height: 40px;
+  padding: 8px 12px;
+}
+
+.add-location-page .avail-hint {
+  margin-top: 4px;
+}
+/* GLOBAL SQUARE SYSTEM */
+.card,
+.section-card,
+.btn,
+.form-control,
+.form-select,
+.table,
+.alert {
+  border-radius: 0 !important;
+}
+

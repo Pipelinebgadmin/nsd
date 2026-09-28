@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Users</h4>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin_page') }}">Admin</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<div class="alert alert-{{ cat }} py-2">{{ msg }}</div>{% endfor %}
+{% endwith %}
+{% if error %}<div class="alert alert-danger py-2">{{ error }}</div>{% endif %}
+
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <h6 class="mb-3">Add User</h6>
+    <form method="POST" class="row g-2 align-items-end">
+      <input type="hidden" name="action" value="add">
+      <div class="col-md-3">
+        <label class="form-label small mb-1">Username</label>
+        <input name="username" class="form-control form-control-sm" autocomplete="off" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small mb-1">Role</label>
+        <select name="role" class="form-select form-select-sm">
+          {% for r in roles %}<option value="{{ r }}" {% if r == 'user' %}selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small mb-1">Password</label>
+        <input name="password" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small mb-1">Confirm</label>
+        <input name="confirm" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
+      </div>
+      <div class="col-md-1">
+        <button class="btn btn-primary btn-sm w-100">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Username</th><th>Role</th><th>Status</th><th>Created</th><th class="text-end">Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.username }}{% if u.id == me.id %} <span class="text-muted small">(you)</span>{% endif %}</td>
+          <td>{{ u.role|capitalize }}</td>
+          <td>
+            {% if u.get('active', True) %}<span class="badge bg-success">Active</span>
+            {% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+          </td>
+          <td class="small text-muted">{{ u.created_at|datetimeformat }}</td>
+          <td class="text-end">
+            <div class="d-inline-flex gap-1 flex-wrap justify-content-end">
+              <form method="POST">
+                <input type="hidden" name="user_id" value="{{ u.id }}">
+                {% if u.role == 'admin' %}
+                  <button name="action" value="make_user" class="btn btn-outline-secondary btn-sm">Make User</button>
+                {% else %}
+                  <button name="action" value="make_admin" class="btn btn-outline-secondary btn-sm">Make Admin</button>
+                {% endif %}
+              </form>
+              {% if u.id != me.id %}
+              <form method="POST"
+                    onsubmit="return confirm('{{ 'Deactivate' if u.get('active', True) else 'Reactivate' }} {{ u.username }}?');">
+                <input type="hidden" name="user_id" value="{{ u.id }}">
+                {% if u.get('active', True) %}
+                  <button name="action" value="deactivate" class="btn btn-outline-danger btn-sm">Deactivate</button>
+                {% else %}
+                  <button name="action" value="activate" class="btn btn-outline-success btn-sm">Reactivate</button>
+                {% endif %}
+              </form>
+              {% endif %}
+              <button class="btn btn-outline-primary btn-sm" type="button"
+                      data-bs-toggle="collapse" data-bs-target="#pw-{{ u.id }}">Reset Password</button>
+            </div>
+          </td>
+        </tr>
+        <tr class="collapse" id="pw-{{ u.id }}">
+          <td colspan="5" class="bg-light">
+            <form method="POST" class="row g-2 align-items-end">
+              <input type="hidden" name="action" value="reset_password">
+              <input type="hidden" name="user_id" value="{{ u.id }}">
+              <div class="col-md-4">
+                <label class="form-label small mb-1">New password for {{ u.username }}</label>
+                <input name="password" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small mb-1">Confirm</label>
+                <input name="confirm" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
+              </div>
+              <div class="col-md-2"><button class="btn btn-primary btn-sm w-100">Save</button></div>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

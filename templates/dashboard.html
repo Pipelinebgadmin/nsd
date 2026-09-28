@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<!-- Page header -->
+<h2 class="section-title" style="margin-top: -6px;">
+    Dashboard
+</h2>
+
+<!-- KPIs -->
+<div class="kpi-row">
+
+  {% if can('costs') %}
+  <!-- KPI 1: Total Inventory Value -->
+  <div class="kpi-card">
+    <div class="kpi-value">
+      ${{ "{:,.0f}".format(kpis.total_value) }}
+    </div>
+    <a href="{{ url_for('list_products') }}" class="text-decoration-none">
+      <div class="kpi-label">Total Inventory Value</div>
+    </a>
+    <div class="text-muted-small">
+      {{ kpis.total_products }} total products
+    </div>
+  </div>
+
+  {% endif %}
+  <!-- KPI 2: On-hand Qty -->
+  <div class="kpi-card">
+    <div class="kpi-label text-uppercase text-muted mb-1" style="font-size: .75rem;">
+      Qty on Hand
+    </div>
+    <div class="kpi-value">
+      {{ kpis.total_gallons | round(1) }} <span class="fs-6 text-muted">GAL</span>
+    </div>
+    <div class="mt-1" style="font-size: .9rem; color: #64748b;">
+      {{ kpis.total_pounds | round(1) }} <span class="text-muted">LB</span>
+    </div>
+  </div>
+
+  <!-- KPI 3: Reorder Alerts -->
+  <div class="kpi-card">
+    <div class="kpi-value">{{ alerts_triggered }}</div>
+    <div class="kpi-label">Reorder Alerts</div>
+    <div class="text-muted-small">
+      {{ alerts_total }} set
+    </div>
+  </div>
+
+  <!-- KPI 4: Products in Staging -->
+  <div class="kpi-card">
+    <div class="kpi-value">{{ staging_active_count }}</div>
+    <div class="kpi-label">Products in Staging</div>
+    <div class="text-muted-small">Currently staged for release</div>
+  </div>
+</div>
+
+<!-- Search + row -->
+<div class="row g-3 my-3 align-items-stretch">
+  <!-- LEFT: Search Bar -->
+  <div class="col-12 col-lg-8">
+    <form action="{{ url_for('product_search') }}" method="get" class="row g-2">
+      <div class="col-9">
+        <input
+          type="text"
+          name="q"
+          class="form-control form-control-lg"
+          placeholder="Search products by name…"
+          required
+        >
+      </div>
+      <div class="col-3 d-grid">
+        <button type="submit" class="btn btn-primary btn-lg">Go</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- Left column -->
+  <div class="col-12 col-lg-8">
+    <!-- Recent Activity (static for now) -->
+    <div class="card section-card shadow-sm mb-4">
+      <div class="card-header bg-white">
+        <div class="d-flex justify-content-between align-items-center">
+          <h2 class="h6 mb-0">Recent Activity</h2>
+          <a href="#" class="btn btn-sm btn-outline-secondary">View all</a>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Time</th>
+                <th>Action</th>
+                <th>Item</th>
+                <th class="text-end">Qty</th>
+                <th>User</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Today 9:42a</td>
+                <td><span class="badge-dot bg-success"></span> Received</td>
+                <td>Methanol (55-gal drum)</td>
+                <td class="text-end">+220 gal</td>
+                <td>csalas</td>
+              </tr>
+              <tr>
+                <td>Yesterday 3:10p</td>
+                <td><span class="badge-dot bg-warning"></span> Adjusted</td>
+                <td>Xylene (IBC tote)</td>
+                <td class="text-end">-10 gal</td>
+                <td>manager</td>
+              </tr>
+              <tr>
+                <td>Oct 14</td>
+                <td><span class="badge-dot bg-info"></span> Blend Created</td>
+                <td>Shop Solvent Mix A</td>
+                <td class="text-end">120 gal</td>
+                <td>ops</td>
+              </tr>
+              <tr>
+                <td>Oct 13</td>
+                <td><span class="badge-dot bg-danger"></span> Reorder Alert</td>
+                <td>Caustic Soda (flakes)</td>
+                <td class="text-end">Low</td>
+                <td>system</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Moving Items (static for now) -->
+    <div class="card section-card shadow-sm">
+      <div class="card-header bg-white">
+        <div class="d-flex justify-content-between align-items-center">
+          <h2 class="h6 mb-0">Top Moving Items (Last 30 days)</h2>
+          <a href="#" class="btn btn-sm btn-outline-secondary">See details</a>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Product</th>
+                <th>Category</th>
+                <th class="text-end">Units Moved</th>
+                <th class="text-end">On-hand</th>
+                <th class="text-end">Reorder Pt</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Toluene</td>
+                <td>Chemicals</td>
+                <td class="text-end">980 gal</td>
+                <td class="text-end">420 gal</td>
+                <td class="text-end">500 gal</td>
+              </tr>
+              <tr>
+                <td>Methanol</td>
+                <td>Chemicals</td>
+                <td class="text-end">610 gal</td>
+                <td class="text-end">860 gal</td>
+                <td class="text-end">400 gal</td>
+              </tr>
+              <tr>
+                <td>IBC Tote (330 gal)</td>
+                <td>Containers</td>
+                <td class="text-end">22 units</td>
+                <td class="text-end">7 units</td>
+                <td class="text-end">10 units</td>
+              </tr>
+              <tr>
+                <td>Caustic Soda (flakes)</td>
+                <td>Chemicals</td>
+                <td class="text-end">1400 lb</td>
+                <td class="text-end">320 lb</td>
+                <td class="text-end">500 lb</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right column -->
+  <div class="col-12 col-lg-4">
+    <!-- Reorder Alerts -->
+    <div class="card section-card shadow-sm mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center bg-white">
+        <div class="fw-semibold">Reorder Alerts</div>
+        <a href="{{ url_for('alerts_page') }}" class="btn btn-sm btn-outline-secondary">Manage</a>
+      </div>
+      <div class="card-body p-0">
+        {% if top5_alerts and top5_alerts|length %}
+          <ul class="list-group list-group-flush">
+            {% for r in top5_alerts %}
+              {% set ratio = r.ratio or 0 %}
+              {% set pct = (ratio * 100) if ratio * 100 < 100 else 100 %}
+              {% set bar_class = 'bg-danger' if r.status == 'critical' else ('bg-warning' if r.status == 'warning' else 'bg-success') %}
+              <li class="list-group-item">
+                <div class="d-flex justify-content-between align-items-center">
+                  <div>
+                    <div class="fw-semibold">{{ r.name }}
+                      <span class="badge {{ 'bg-danger' if r.status == 'critical' else 'bg-warning text-dark' }} ms-1">{{ 'Below reorder point' if r.status == 'critical' else 'Getting low' }}</span>
+                    </div>
+                    <div class="text-muted-small">
+                      <div>On hand {{ '{:,.2f}'.format(r.display_on_hand) }} {{ r.display_unit | unit_caps }}</div>
+                      <div>Reorder at {{ '{:,.2f}'.format(r.display_threshold) }} {{ r.display_unit | unit_caps }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="progress mt-2" style="height:8px;">
+                  <div class="progress-bar {{ bar_class }}"
+                       role="progressbar"
+                       style="width: {{ '%.0f'|format(pct) }}%;"
+                       aria-valuemin="0" aria-valuemax="100"
+                       aria-valuenow="{{ '%.0f'|format(pct) }}">
+                  </div>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="p-3 text-muted">Nothing is low right now.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card section-card shadow-sm mb-4">
+      <div class="card-header bg-white">
+        <h2 class="h6 mb-0">Quick Actions</h2>
+      </div>
+      <div class="card-body">
+        <div class="d-grid gap-2">
+          <a href="{{ url_for('inventory_adjust_page') }}" class="btn btn-primary">Receive Inventory</a>
+          <a href="{{ url_for('blend_new_page') }}" class="btn btn-outline-secondary">Create Blend</a>
+          <a href="{{ url_for('add_product') }}" class="btn btn-outline-secondary">Add Product</a>
+          <a href="{{ url_for('list_products') }}" class="btn btn-outline-secondary">View All Products</a>
+          <a href="{{ url_for('inventory_overview') }}" class="btn btn-outline-secondary">Inventory Overview</a>
+        </div>
+      </div>
+    </div>
+
+
+<!-- Footer note -->
+<div class="text-center text-muted mt-4">
+  <small>Dashboard • NStock</small>
+</div>
+
+{% endblock %}

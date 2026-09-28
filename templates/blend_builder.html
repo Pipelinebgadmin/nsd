@@ -1,0 +1,947 @@
+{% extends "base.html" %}
+
+{% block title %}NStock — Build Blend{% endblock %}
+
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+<div class="container my-4">
+
+  <style>
+    /* Page-specific tweaks (everything else comes from nstock.css + Bootstrap) */
+    .k { font-size: .9rem; color: #6c757d; }
+    .error-list li { margin-bottom: .25rem; }
+    .mode-pill { font-size: .85rem; }
+    .ing-table th, .ing-table td { vertical-align: middle; }
+    .w-qty { width: 140px; }
+    .w-unit { width: 120px; }
+    .w-percent { width: 140px; }
+
+    /* Blend Builder Tabs (matches inventory adjust tab behavior) */
+    .bb-tabs { display:flex; gap:10px; flex-wrap:wrap; margin: 4px 0 16px; }
+    .bb-tab-btn{
+      appearance:none;
+      background:#fff;
+      border:1px solid var(--line, #d6dde6);
+      padding:8px 14px;
+      font-size:14px;
+      cursor:pointer;
+    }
+    .bb-tab-btn.active{
+      border-color: var(--accent, #1d4ed8);
+      box-shadow: 0 0 0 2px rgba(29, 78, 216, .12);
+    }
+  </style>
+
+  <!-- Header -->
+  <h2 class="section-title" style="margin-top: -6px;">
+    Blend
+  </h2>
+
+  <!-- Tabs: Execute From Formula for everyone with Blend access;
+       Quick Build only for users an admin has given Blend Builder access -->
+  {% set show_exec = can('blending') %}
+  {% set show_builder = can('blend_builder') %}
+  <div class="bb-tabs {% if not (show_exec and show_builder) %}d-none{% endif %}" role="tablist" aria-label="Blend tabs">
+    {% if show_exec %}
+    <button type="button" class="bb-tab-btn" data-bb-tab="execute" aria-controls="bbPanelExecute" aria-selected="false">
+      Execute From Formula
+    </button>
+    {% endif %}
+    {% if show_builder %}
+    <button type="button" class="bb-tab-btn" data-bb-tab="builder" aria-controls="bbPanelBuilder" aria-selected="false">
+      Quick Build
+    </button>
+    {% endif %}
+  </div>
+
+  <!-- ========================= -->
+  <!-- Panel: Blend Builder -->
+  <!-- ========================= -->
+  <div id="bbPanelBuilder" class="bb-tab-panel d-none">
+
+    <!-- Errors -->
+    <div id="errorBox" class="alert alert-danger d-none" role="alert">
+      <div class="fw-semibold mb-1">Please fix the following:</div>
+      <ul class="mb-0 error-list"></ul>
+    </div>
+
+    <!-- Basics -->
+    <div class="card section-card shadow-sm mb-4">
+      <div class="card-header bg-white">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="h6 mb-0">Basics</div>
+          <div class="d-flex align-items-center gap-3">
+            <div class="mode-pill">
+              <span class="k">Mode:</span>
+              <div class="form-check form-check-inline ms-2">
+                <input class="form-check-input" type="radio" name="mode" id="modePercent" value="percent" checked>
+                <label class="form-check-label" for="modePercent">Percent</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="mode" id="modeAbsolute" value="absolute">
+                <label class="form-check-label" for="modeAbsolute">Absolute</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <form id="blendForm" class="row g-3">
+          <div class="col-12 col-lg-6">
+            <label class="form-label">Blend name</label>
+            <input class="form-control" id="blendName" placeholder="e.g., Shop Solvent A" />
+          </div>
+
+          <div class="col-12 col-lg-6">
+            <label class="form-label">Target</label>
+            <div class="d-flex gap-2">
+              <input class="form-control w-qty" id="targetQty" type="number" step="any" min="0" placeholder="e.g., 120" />
+              <select class="form-select w-unit" id="targetUnit">
+                <option value="gal" selected>GAL</option>
+                <option value="lb">LB</option>
+              </select>
+            </div>
+            <div class="k mt-1">This is the total size of the finished batch.</div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Ingredients -->
+    <div class="card section-card shadow-sm mb-4">
+      <div class="card-header bg-white">
+        <div class="d-flex justify-content-between align-items-center">
+          <div class="h6 mb-0">Ingredients</div>
+          <div class="d-flex align-items-center gap-3">
+            <div class="k d-none" id="percentSumWrap">Percent total: <span id="percentSum">0</span>%</div>
+            <div class="k d-none" id="absSumWrap">
+              Normalized total: <span id="absSum">0</span> <span id="absSumUnit">GAL</span>
+            </div>
+            <button class="btn btn-primary btn-sm" id="addRowBtn" type="button">+ Add Ingredient</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table mb-0 ing-table align-middle">
+            <thead class="table-light">
+              <tr>
+                <th style="min-width: 320px;">Product</th>
+                <th class="percent-col">Percent</th>
+                <th class="qty-col d-none">Quantity</th>
+                <th class="unit-col d-none">Unit</th>
+                <th class="text-end" style="width: 120px;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card-footer bg-white">
+        <div class="k">
+          Percent mode requires the total to be exactly 100%. Absolute mode requires the sum
+          of ingredients (normalized to the target unit) to equal the target amount.
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="d-flex justify-content-end gap-2">
+      <button class="btn btn-outline-secondary" id="resetBtn" type="button">Reset</button>
+      <button class="btn btn-success" id="buildBtn" type="button">Build Blend</button>
+    </div>
+
+    <!-- Results (shown after success) -->
+    <div id="resultCard" class="card section-card shadow-sm mt-4 d-none">
+      <div class="card-header bg-white">
+        <div class="h6 mb-0">Blend Created</div>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-6">
+            <div class="k">New Product</div>
+            <div class="fs-5 fw-semibold" id="resName">—</div>
+            <div class="k">ID: <span id="resId">—</span></div>
+          </div>
+          <div class="col-12 col-md-6">
+            <div class="k">Computed</div>
+            <div>Weight: <span id="resWpg">—</span> LB/GAL</div>
+            <div {% if not can('costs') %}class="d-none"{% endif %}>Cost: $<span id="resCpg">—</span> / GAL</div>
+          </div>
+        </div>
+        <div class="mt-3">
+          <a class="btn btn-primary" id="resViewBtn" href="#">View Product</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formula Library (Bottom Section) -->
+   
+
+  </div>
+
+  <!-- ========================= -->
+  <!-- Panel: Execute From Formula -->
+  <!-- ========================= -->
+  <div id="bbPanelExecute" class="bb-tab-panel d-none">
+    <div class="card section-card shadow-sm mb-4">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <div class="h6 mb-0">Execute From Formula</div>
+        <div class="text-muted small">Select a formula, enter batch size, then execute</div>
+      </div>
+
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('blend_execute_formula') }}" id="execForm">
+          <style>
+            .src-table th { font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; color: #64748b; font-weight: 700; white-space: nowrap; vertical-align: bottom; }
+            .src-table td { vertical-align: middle; }
+            .src-table .pkg-col { background: #fffbeb; }
+            .src-table .partial-col { background: #ecfeff; }
+            .src-table .open-col { background: #fef2f2; }
+            .src-table .tank-col { background: #f0fdf4; }
+            .src-table select.src-tank { min-width: 150px; }
+            .src-table input.form-control, .src-table select.form-select { min-width: 74px; }
+            .src-avail { font-size: .72rem; color: #64748b; white-space: nowrap; }
+            .src-status { font-weight: 700; white-space: nowrap; }
+            .src-status.ok { color: #15803d; } .src-status.short { color: #b91c1c; } .src-status.over { color: #b45309; }
+            .src-name { font-weight: 600; white-space: nowrap; }
+          </style>
+
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label class="form-label" for="execLocation">Location <span class="text-danger">*</span></label>
+              <select name="location_id" id="execLocation" class="form-select" required>
+                <option value="">Where is it being made?</option>
+                {% for loc in locations %}<option value="{{ loc.id }}">{{ loc.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="execFormula">Formula</label>
+              <select name="formula_id" id="execFormula" class="form-select" required>
+                {% for f in formulas %}
+                  <option value="{{ f.id }}" {% if f.id == selected_formula_id %}selected{% endif %}>{{ f.name }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">
+                {% if not formulas %}No formulas yet.{% endif %}
+                {% if can('formulas') %}<a href="{{ url_for('formulas_page') }}">Open the Formula Catalog</a>{% endif %}
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="execBatchQty">Batch quantity</label>
+              <input name="batch_qty" id="execBatchQty" type="number" class="form-control" step="any" min="0" required>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label" for="execBatchUnit">Unit</label>
+              <select name="batch_unit" id="execBatchUnit" class="form-select">
+                <option value="gal">GAL</option>
+                <option value="lb">LB</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <div class="d-flex justify-content-between align-items-end mb-2">
+              <div>
+                <div class="h6 mb-0">Where each ingredient comes from</div>
+                <div class="small text-muted">Enter full packages used, gallons from partial stock, and any package you opened.</div>
+              </div>
+              <div class="small text-muted" id="srcLocLabel"></div>
+            </div>
+            <div class="alert alert-warning py-2 d-none" id="srcError"></div>
+            <div class="alert alert-info py-2 mb-2" id="srcHint">Pick where the blend is being made and a formula to see the ingredients.</div>
+            <div class="table-responsive d-none" id="srcWrap">
+              <table class="table table-sm align-middle mb-0 src-table">
+                <thead id="srcHead"></thead>
+                <tbody id="srcBody"></tbody>
+                <tfoot id="srcFoot"></tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Package the finished blend -->
+          <div class="mt-4 d-none" id="outWrap">
+            <div class="d-flex justify-content-between align-items-end mb-2">
+              <div>
+                <div class="h6 mb-0">Where the finished blend goes <span class="text-muted fw-normal small">(optional)</span></div>
+                <div class="small text-muted">Put it into packages and/or a tank. Anything left over stays as unpackaged gallons.</div>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-primary" id="outAdd">+ Add Package</button>
+            </div>
+            <div id="outRows" class="d-grid gap-2"></div>
+            <div class="row g-2 align-items-center mt-1 d-none" id="outTankRow">
+              <div class="col-md-5"><select class="form-select" name="out_tank_id" id="outTank" aria-label="Tank for the finished blend">
+                <option value="">Into a tank… (optional)</option></select></div>
+              <div class="col-md-3"><div class="input-group">
+                <input type="number" min="0" step="any" class="form-control text-end" name="out_tank_gal" id="outTankGal" placeholder="0" aria-label="Gallons into tank">
+                <span class="input-group-text">gal</span></div></div>
+              <div class="col-md-4 small text-muted" id="outTankNote"></div>
+            </div>
+            <div class="small mt-2" id="outSummary"></div>
+          </div>
+
+          <div class="alert alert-danger mt-3 mb-0 d-none" id="execErrors" role="alert" tabindex="-1">
+            <div class="fw-semibold mb-1">This blend can't run yet:</div>
+            <ul class="mb-0" id="execErrorList"></ul>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-8">
+              <label class="form-label" for="execNotes">Notes <span class="text-muted">(optional)</span></label>
+              <input name="notes" id="execNotes" class="form-control" maxlength="300" placeholder="Tank, operator, customer…">
+            </div>
+            <div class="col-md-4 d-flex align-items-end justify-content-end gap-2">
+              <a href="{{ url_for('blend_log_page') }}" class="btn btn-outline-secondary">Blend Log</a>
+              <button type="submit" class="btn btn-primary" id="execBtn" disabled>Execute Blend</button>
+            </div>
+          </div>
+        </form>
+
+        {% if exec_result and can('costs') %}
+        <hr class="my-4" />
+        <div class="alert alert-success mb-3">
+          <div class="fw-semibold">Blend executed successfully.</div>
+          <div class="small">
+            Made <strong>{{ exec_result.total_gal }}</strong> GAL @
+            <strong>${{ exec_result.cost_per_gal }}</strong>/GAL —
+            Total Cost: <strong>${{ exec_result.total_cost_value }}</strong>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header bg-white">
+            <div class="h6 mb-0">Inventory Updates</div>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table mb-0">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th class="text-end">Qty Used</th>
+                    <th>Unit</th>
+                    <th class="text-end">Total Cost</th>
+                    <th class="text-end">Cost / GAL</th>
+                    <th class="text-end">New Qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for c in exec_result.components %}
+                  <tr>
+                    <td>{{ c.name }}</td>
+                    <td class="text-end">{{ c.qty_used }}</td>
+                    <td>{{ c.unit }}</td>
+                    <td class="text-end">${{ c.total_cost }}</td>
+                    <td class="text-end">${{ c.cost_per_gal }}</td>
+                    <td class="text-end">{{ c.new_qty }}</td>
+                  </tr>
+                  {% endfor %}
+                  <tr class="table-light">
+                    <td class="fw-semibold">{{ exec_result.blend_name or "Blend" }}</td>
+                    <td class="text-end fw-semibold">+{{ exec_result.qty_added }}</td>
+                    <td class="fw-semibold">GAL</td>
+                    <td class="text-end fw-semibold">${{ exec_result.total_cost_value }}</td>
+                    <td class="text-end fw-semibold">${{ exec_result.cost_per_gal }}</td>
+                    <td class="text-end fw-semibold">{{ exec_result.blend_new_qty }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Page JS -->
+  <script>
+    // --- State ---
+    let products = [];               // populated from /blend/builder
+    let mode = 'percent';            // 'percent' | 'absolute'
+    const rowsEl = document.getElementById('rows');
+
+    // --- Helpers ---
+    const $ = (sel) => document.querySelector(sel);
+    const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
+
+    function showErrors(list) {
+      const box = document.getElementById('errorBox');
+      const ul = box.querySelector('ul');
+      ul.innerHTML = '';
+      (list || []).forEach(msg => {
+        const li = document.createElement('li');
+        li.textContent = msg;
+        ul.appendChild(li);
+      });
+      box.classList.toggle('d-none', !list || !list.length);
+    }
+
+    function productOptionsHtml() {
+      return products.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    }
+    let productNameById = {};
+
+    function buildProductNameMap() {
+      productNameById = {};
+      (products || []).forEach(p => {
+        productNameById[String(p.id)] = p.name;
+      });
+    }
+
+    function productName(pid) {
+      return productNameById[String(pid)] || pid || '—';
+    }
+
+    function addRow(prefill = {}) {
+      const tr = el('tr');
+
+      // Product
+      const tdProd = el('td');
+      const sel = el('select', 'form-select');
+      sel.innerHTML = `<option value="" selected disabled>Select product…</option>` + productOptionsHtml();
+      if (prefill.product_id) sel.value = prefill.product_id;
+      tdProd.appendChild(sel);
+
+      // Percent (Percent mode)
+      const tdPct = el('td', 'percent-col');
+      const pct = el('input', 'form-control w-percent');
+      pct.type = 'number'; pct.min = '0'; pct.step = 'any'; pct.placeholder = 'e.g., 50';
+      if (prefill.percent != null) pct.value = prefill.percent;
+      tdPct.appendChild(pct);
+
+      // Quantity + Unit (Absolute mode)
+      const tdQty = el('td', 'qty-col d-none');
+      const qty = el('input', 'form-control w-qty');
+      qty.type = 'number'; qty.min = '0'; qty.step = 'any'; qty.placeholder = 'e.g., 55';
+      if (prefill.qty != null) qty.value = prefill.qty;
+      tdQty.appendChild(qty);
+
+      const tdUnit = el('td', 'unit-col d-none');
+      const u = el('select', 'form-select w-unit');
+      u.innerHTML = `<option value="gal">gal</option><option value="lb">lb</option><option value="unit">unit</option>`;
+      if (prefill.qty_unit) u.value = prefill.qty_unit;
+      tdUnit.appendChild(u);
+
+      // Action
+      const tdAct = el('td', 'text-end');
+      const rm = el('button', 'btn btn-outline-danger btn-sm');
+      rm.type = 'button'; rm.textContent = 'Remove';
+      rm.addEventListener('click', () => { tr.remove(); recalc(); });
+      tdAct.appendChild(rm);
+
+      tr.appendChild(tdProd);
+      tr.appendChild(tdPct);
+      tr.appendChild(tdQty);
+      tr.appendChild(tdUnit);
+      tr.appendChild(tdAct);
+      rowsEl.appendChild(tr);
+
+      // update sums when inputs change
+      [sel, pct, qty, u].forEach(x => x.addEventListener('input', recalc));
+      recalc();
+    }
+
+    function setMode(newMode) {
+      mode = newMode;
+      const pctCols = document.querySelectorAll('.percent-col');
+      const qtyCols = document.querySelectorAll('.qty-col');
+      const unitCols = document.querySelectorAll('.unit-col');
+      pctCols.forEach(c => c.classList.toggle('d-none', mode !== 'percent'));
+      qtyCols.forEach(c => c.classList.toggle('d-none', mode !== 'absolute'));
+      unitCols.forEach(c => c.classList.toggle('d-none', mode !== 'absolute'));
+
+      document.getElementById('percentSumWrap').classList.toggle('d-none', mode !== 'percent');
+      document.getElementById('absSumWrap').classList.toggle('d-none', mode !== 'absolute');
+      recalc();
+    }
+
+    function recalc() {
+      showErrors([]);
+      const targetQty = parseFloat(document.getElementById('targetQty').value || '0');
+      const targetUnit = document.getElementById('targetUnit').value;
+
+      if (mode === 'percent') {
+        let sum = 0;
+        rowsEl.querySelectorAll('tr').forEach(tr => {
+          const v = parseFloat(tr.querySelector('.percent-col input')?.value || '0');
+          sum += (isNaN(v) ? 0 : v);
+        });
+        document.getElementById('percentSum').textContent = sum.toFixed(2);
+      } else {
+        // absolute: show normalized sum in target unit (client-side best-effort)
+        // NOTE: true normalization (esp. lb/unit) is server-validated using product weights.
+        let sum = 0;
+        rowsEl.querySelectorAll('tr').forEach(tr => {
+          const qty = parseFloat(tr.querySelector('.qty-col input')?.value || '0');
+          const unit = tr.querySelector('.unit-col select')?.value || 'gal';
+          // Client preview: only add when unit matches target; server will do full conversions.
+          if (!isNaN(qty) && unit === targetUnit) sum += qty;
+        });
+        document.getElementById('absSum').textContent = sum.toFixed(2);
+        document.getElementById('absSumUnit').textContent = targetUnit;
+      }
+    }
+
+    async function fetchProducts() {
+      const res = await fetch('{{ url_for("blend_builder_info") }}');
+      const data = await res.json();
+      products = data.products || [];
+      buildProductNameMap();
+      // seed two empty rows
+      if (rowsEl.children.length === 0) {
+        addRow();
+        addRow();
+      }
+    }
+
+    async function buildBlend() {
+      showErrors([]);
+      const name = document.getElementById('blendName').value.trim();
+      const targetQty = parseFloat(document.getElementById('targetQty').value || '0');
+      const targetUnit = document.getElementById('targetUnit').value;
+
+      const errors = [];
+      if (!name) errors.push('Blend name is required.');
+      if (!(targetQty > 0)) errors.push('Target quantity must be > 0.');
+
+      const comps = [];
+      rowsEl.querySelectorAll('tr').forEach(tr => {
+        const pid = tr.querySelector('select.form-select')?.value || '';
+        if (!pid) return;
+        if (mode === 'percent') {
+          const pct = parseFloat(tr.querySelector('.percent-col input')?.value || '0');
+          if (pct > 0) comps.push({ product_id: pid, percent: pct });
+        } else {
+          const qty = parseFloat(tr.querySelector('.qty-col input')?.value || '0');
+          const unit = tr.querySelector('.unit-col select')?.value || 'gal';
+          if (qty > 0) comps.push({ product_id: pid, qty, qty_unit: unit });
+        }
+      });
+
+      if (comps.length === 0) errors.push('Add at least one ingredient.');
+
+      if (mode === 'percent') {
+        const s = comps.reduce((acc, c) => acc + (parseFloat(c.percent) || 0), 0);
+        if (Math.abs(s - 100) > 0.001) errors.push(`Percentages must sum to 100 (got ${s.toFixed(2)}).`);
+      }
+
+      if (errors.length) { showErrors(errors); return; }
+
+      const payload = {
+        name,
+        target_qty: targetQty,
+        target_unit: targetUnit,
+        mode,
+        components: comps,
+        execute: true,
+        location: 'Production'
+      };
+
+
+      const res = await fetch('{{ url_for("blend_build") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showErrors((data && data.errors) || ['Unable to build blend.']);
+        return;
+      }
+
+      // Success — show summary & link to new product
+      const np = data.result.new_product;
+      document.getElementById('resultCard').classList.remove('d-none');
+      document.getElementById('resName').textContent = np.name || 'New Blend';
+      document.getElementById('resId').textContent = np.id || '—';
+      document.getElementById('resWpg').textContent = (data.result.blend_lb_per_gal || 0).toFixed(4);
+      document.getElementById('resCpg').textContent = (data.result.cost_per_gal || 0).toFixed(4);
+      document.getElementById('resViewBtn').href =
+        `{{ url_for('product_detail', product_id='__ID__') }}`.replace('__ID__', np.id);
+
+      document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // --- Tabs (Blend Builder) ---
+    function showBlendTab(tabName){
+      const btns = document.querySelectorAll('.bb-tab-btn');
+      const panels = {
+        builder: document.getElementById('bbPanelBuilder'),
+        execute: document.getElementById('bbPanelExecute')
+      };
+
+      btns.forEach(b => {
+        const isActive = (b.getAttribute('data-bb-tab') === tabName);
+        b.classList.toggle('active', isActive);
+        b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+
+      Object.keys(panels).forEach(k => {
+        const p = panels[k];
+        if (!p) return;
+        p.classList.toggle('d-none', k !== tabName);
+      });
+    }
+
+    document.querySelectorAll('.bb-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => showBlendTab(btn.getAttribute('data-bb-tab')));
+    });
+
+    // --- Events ---
+    document.getElementById('addRowBtn').addEventListener('click', () => addRow());
+    document.getElementById('buildBtn').addEventListener('click', buildBlend);
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      rowsEl.innerHTML = '';
+      addRow(); addRow();
+      showErrors([]);
+      document.getElementById('resultCard').classList.add('d-none');
+    });
+    document.getElementById('modePercent').addEventListener('change', () => setMode('percent'));
+    document.getElementById('modeAbsolute').addEventListener('change', () => setMode('absolute'));
+    document.getElementById('targetQty').addEventListener('input', recalc);
+    document.getElementById('targetUnit').addEventListener('change', recalc);
+
+    // --- Init ---
+    showBlendTab('{{ "execute" if show_exec else "builder" }}');
+    setMode('percent');
+    {% if show_builder %}fetchProducts();{% endif %}
+
+    // ---- Execute From Formula: package sourcing ----
+    (function () {
+      const TOL = 0.01;
+      const locSel = document.getElementById('execLocation');
+      const fSel = document.getElementById('execFormula');
+      const qtyEl = document.getElementById('execBatchQty');
+      const unitEl = document.getElementById('execBatchUnit');
+      const head = document.getElementById('srcHead');
+      const body = document.getElementById('srcBody');
+      const foot = document.getElementById('srcFoot');
+      const wrap = document.getElementById('srcWrap');
+      const hint = document.getElementById('srcHint');
+      const errBox = document.getElementById('srcError');
+      const execBtn = document.getElementById('execBtn');
+      const LOC_KEY = 'nstock.blendLocation';
+      let plan = null, timer = null;
+
+      const fmt = (n) => (Math.round(Number(n) * 1000) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
+      const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+      try { const saved = localStorage.getItem(LOC_KEY); if (saved && [...locSel.options].some(o => o.value === saved)) locSel.value = saved; } catch (e) {}
+      if (!locSel.value && locSel.options.length === 2) locSel.selectedIndex = 1;
+
+      function schedule() { clearTimeout(timer); timer = setTimeout(loadPlan, 300); }
+
+      async function loadPlan() {
+        errBox.classList.add('d-none');
+        try { localStorage.setItem(LOC_KEY, locSel.value); } catch (e) {}
+        // Show the ingredients as soon as there's a location and formula; the batch size fills in "Needed".
+        if (!locSel.value || !fSel.value) {
+          plan = null; wrap.classList.add('d-none'); outWrap.classList.add('d-none'); execBtn.disabled = true;
+          hint.textContent = !fSel.value
+            ? 'There are no formulas yet. Create one in the Formula Catalog first.'
+            : 'Pick where the blend is being made to see the ingredients and what is on hand there.';
+          hint.classList.remove('d-none'); return;
+        }
+        const qs = new URLSearchParams({ location_id: locSel.value, formula_id: fSel.value, batch_qty: Number(qtyEl.value) > 0 ? qtyEl.value : 0, batch_unit: unitEl.value });
+        const res = await fetch('{{ url_for("api_blend_plan") }}?' + qs);
+        const data = await res.json().catch(() => ({ ok: false, errors: ['Could not load the formula.'] }));
+        if (!data.ok) {
+          plan = null; wrap.classList.add('d-none'); hint.classList.add('d-none'); execBtn.disabled = true;
+          errBox.textContent = (data.errors || []).join(' '); errBox.classList.remove('d-none'); return;
+        }
+        plan = data; render();
+      }
+
+      function render() {
+        const types = plan.package_types;
+        document.getElementById('srcLocLabel').textContent = 'Pulling from ' + plan.location;
+        head.innerHTML = '<tr><th>Component</th><th class="text-end">Needed<br>(GAL)</th>' +
+          types.map(t => `<th class="pkg-col text-center">Full<br>${esc(t.name)}</th>`).join('') +
+          '<th class="tank-col text-center" colspan="2">From tank<br>tank &middot; gal</th>' +
+          '<th class="partial-col text-center">From partial<br>(GAL)</th>' +
+          '<th class="open-col text-center" colspan="2">Opened a package<br>type &middot; gal out</th>' +
+          '<th class="text-end">Pulled<br>(GAL)</th><th>Status</th><th></th></tr>';
+
+        body.innerHTML = plan.components.map(c => {
+          const byId = Object.fromEntries(c.packages.map(p => [p.package_id, p]));
+          const pkgCells = types.map(t => {
+            const p = byId[t.id];
+            if (!p) return '<td class="pkg-col text-center text-muted">&ndash;</td>';
+            return `<td class="pkg-col"><input type="number" min="0" step="1" max="${p.quantity}" class="form-control form-control-sm text-end src-full"
+                      name="full__${c.product_id}__${t.id}" data-vol="${p.volume_gal}" data-have="${p.quantity}" aria-label="Full ${esc(t.name)} used">
+                    <div class="src-avail">of ${fmt(p.quantity)}</div></td>`;
+          }).join('');
+          const tankCells = c.tanks.length
+            ? `<td class="tank-col"><select class="form-select form-select-sm src-tank" name="tank__${c.product_id}" aria-label="Tank">
+                  <option value="">&ndash;</option>
+                  ${c.tanks.map(t => `<option value="${t.tank_id}" data-fill="${t.fill_gal}">${esc(t.name)} (${fmt(t.fill_gal)})</option>`).join('')}
+                </select></td>
+               <td class="tank-col"><input type="number" min="0" step="any" class="form-control form-control-sm text-end src-tankgal"
+                  name="tankgal__${c.product_id}" aria-label="Gallons from tank"></td>`
+            : '<td class="tank-col text-center text-muted" colspan="2">no tank</td>';
+          const openOpts = '<option value="">&ndash;</option>' + c.packages.map(p =>
+            `<option value="${p.package_id}" data-vol="${p.volume_gal}">${esc(p.package_name)}</option>`).join('');
+          return `<tr data-pid="${c.product_id}" data-needed="${c.needed_gal}" data-partial-avail="${c.unpackaged_gal}">
+              <td><div class="src-name">${esc(c.name)}</div><div class="src-avail">${fmt(c.percent)}% &middot; ${fmt(c.bulk_gal)} gal on hand${c.tank_gal ? ' &middot; ' + fmt(c.tank_gal) + ' in tanks' : ''}</div></td>
+              <td class="text-end fw-semibold">${Number(qtyEl.value) > 0 ? fmt(c.needed_gal) : '&ndash;'}</td>
+              ${pkgCells}
+              ${tankCells}
+              <td class="partial-col"><input type="number" min="0" step="any" class="form-control form-control-sm text-end src-partial"
+                    name="partial__${c.product_id}" aria-label="Gallons from partial stock">
+                  <div class="src-avail">${fmt(c.unpackaged_gal)} avail</div></td>
+              <td class="open-col"><select class="form-select form-select-sm src-openpkg" name="openpkg__${c.product_id}" ${c.packages.length ? '' : 'disabled'} aria-label="Opened package type">${openOpts}</select></td>
+              <td class="open-col"><input type="number" min="0" step="any" class="form-control form-control-sm text-end src-opengal"
+                    name="opengal__${c.product_id}" ${c.packages.length ? '' : 'disabled'} aria-label="Gallons out of opened package"></td>
+              <td class="text-end fw-semibold src-pulled">0</td>
+              <td class="src-status short">Short</td>
+              <td><button type="button" class="btn btn-sm btn-outline-secondary src-suggest" title="Fill in a suggestion">Suggest</button></td>
+            </tr>`;
+        }).join('');
+
+        foot.innerHTML = `<tr class="table-light"><td class="fw-bold">Total</td><td class="text-end fw-bold">${Number(qtyEl.value) > 0 ? fmt(plan.total_gal) : '&ndash;'}</td>
+            <td colspan="${types.length + 5}"></td><td class="text-end fw-bold" id="srcTotalPulled">0</td><td colspan="2" id="srcTotalStatus"></td></tr>`;
+
+        const noQty = !(Number(qtyEl.value) > 0);
+        hint.textContent = 'Enter a batch quantity to see how much of each ingredient you need.';
+        hint.classList.toggle('d-none', !noQty);
+        wrap.classList.remove('d-none');
+        const outTankSel = document.getElementById('outTank');
+        const keepTank = outTankSel.value;
+        outTankSel.innerHTML = '<option value="">Into a tank… (optional)</option>' + (plan.out_tanks || []).map(t =>
+          `<option value="${t.id}" data-free="${t.free_gal}">${esc(t.name)} &mdash; ${t.product_name ? esc(t.product_name) + ', ' : 'empty, '}room for ${fmt(t.free_gal)} gal</option>`).join('');
+        if ([...outTankSel.options].some(o => o.value === keepTank)) outTankSel.value = keepTank;
+        document.getElementById('outTankRow').classList.toggle('d-none', !(plan.out_tanks || []).length);
+        outWrap.classList.toggle('d-none', !fillableTypes().length && !(plan.out_tanks || []).length);
+        const keep = [...outRows.querySelectorAll('.out-row')].map(r => [r.querySelector('.out-pkg').value, r.querySelector('.out-qty').value]);
+        outRows.innerHTML = '';
+        keep.forEach(([id, q]) => addOutRow(id, q));
+        body.querySelectorAll('input, select').forEach(el => el.addEventListener('input', recalc));
+        body.querySelectorAll('.src-suggest').forEach(btn => btn.addEventListener('click', () => suggest(btn.closest('tr'))));
+        recalc();
+      }
+
+      function rowPulled(tr) {
+        let pulled = 0;
+        tr.querySelectorAll('.src-full').forEach(i => { pulled += (parseFloat(i.value) || 0) * Number(i.dataset.vol); });
+        pulled += parseFloat(tr.querySelector('.src-partial').value) || 0;
+        if (tr.querySelector('.src-openpkg').value) pulled += parseFloat(tr.querySelector('.src-opengal').value) || 0;
+        const tankSel = tr.querySelector('.src-tank');
+        if (tankSel && tankSel.value) pulled += parseFloat(tr.querySelector('.src-tankgal').value) || 0;
+        return pulled;
+      }
+
+      function rowProblem(tr) {
+        for (const i of tr.querySelectorAll('.src-full')) {
+          if ((parseFloat(i.value) || 0) > Number(i.dataset.have)) return 'Not enough packages';
+          if (i.value && !Number.isInteger(Number(i.value))) return 'Whole packages only';
+        }
+        if ((parseFloat(tr.querySelector('.src-partial').value) || 0) > Number(tr.dataset.partialAvail) + TOL) return 'Not enough partial';
+        const sel = tr.querySelector('.src-openpkg'), gal = parseFloat(tr.querySelector('.src-opengal').value) || 0;
+        if (sel.value && gal <= 0) return 'Enter gal out';
+        if (!sel.value && gal > 0) return 'Pick package';
+        if (sel.value && gal > Number(sel.selectedOptions[0].dataset.vol) + TOL) return 'Too many gal';
+        const tSel = tr.querySelector('.src-tank');
+        if (tSel) {
+          const tg = parseFloat(tr.querySelector('.src-tankgal').value) || 0;
+          if (tSel.value && tg <= 0) return 'Enter tank gal';
+          if (!tSel.value && tg > 0) return 'Pick tank';
+          if (tSel.value && tg > Number(tSel.selectedOptions[0].dataset.fill) + TOL) return 'Not that much in tank';
+        }
+        return null;
+      }
+
+      function recalc() {
+        let allOk = true, totalPulled = 0, totalOver = 0;
+        body.querySelectorAll('tr').forEach(tr => {
+          const need = Number(tr.dataset.needed), pulled = rowPulled(tr);
+          totalPulled += pulled;
+          tr.querySelector('.src-pulled').textContent = fmt(pulled);
+          const st = tr.querySelector('.src-status'), problem = rowProblem(tr);
+          if (!(need > 0)) { st.className = 'src-status text-muted'; st.textContent = 'Needs batch size'; allOk = false; }
+          else if (problem) { st.className = 'src-status short'; st.textContent = problem; allOk = false; }
+          else if (pulled + TOL < need) { st.className = 'src-status short'; st.textContent = 'Short ' + fmt(need - pulled); allOk = false; }
+          else if (pulled - need > TOL) { st.className = 'src-status over'; st.textContent = '\u2713 +' + fmt(pulled - need) + ' over'; totalOver += pulled - need; }
+          else { st.className = 'src-status ok'; st.textContent = '\u2713'; }
+        });
+        document.getElementById('srcTotalPulled').textContent = fmt(totalPulled);
+        document.getElementById('srcTotalStatus').innerHTML = totalOver > TOL
+          ? `<span class="src-status over">${fmt(totalOver)} gal overage (logged as loss)</span>` : '';
+        const outOk = updateOutSummary();
+        execBtn.disabled = !(allOk && outOk);
+        if (typeof showErrors === 'function' && !errPanel.classList.contains('d-none')) showErrors([]);
+      }
+
+      // ---- Package the finished blend ----
+      const outWrap = document.getElementById('outWrap');
+      const outRows = document.getElementById('outRows');
+      const outSummary = document.getElementById('outSummary');
+
+      function fillableTypes() { return (plan ? plan.package_types : []).filter(t => t.fillable && t.volume_gal > 0); }
+
+      function addOutRow(pkgId = '', qty = '') {
+        const row = document.createElement('div');
+        row.className = 'row g-2 align-items-center out-row';
+        row.innerHTML = `
+          <div class="col-md-5"><select class="form-select out-pkg" name="out_package_id[]" aria-label="Package type">
+            <option value="">Package type…</option>
+            ${fillableTypes().map(t => `<option value="${t.id}" data-vol="${t.volume_gal}">${esc(t.name)} (${fmt(t.volume_gal)} gal)</option>`).join('')}
+          </select></div>
+          <div class="col-md-3"><div class="input-group">
+            <input type="number" min="1" step="1" class="form-control text-end out-qty" name="out_package_qty[]" placeholder="0" aria-label="How many">
+            <span class="input-group-text">packages</span></div></div>
+          <div class="col-md-3 small text-muted out-gal"></div>
+          <div class="col-md-1 text-end"><button type="button" class="btn btn-outline-danger btn-sm out-del" aria-label="Remove">&times;</button></div>`;
+        row.querySelector('.out-pkg').value = pkgId;
+        row.querySelector('.out-qty').value = qty;
+        row.querySelectorAll('input, select').forEach(el => el.addEventListener('input', recalc));
+        row.querySelector('.out-del').addEventListener('click', () => { row.remove(); recalc(); });
+        outRows.appendChild(row);
+        recalc();
+      }
+      document.getElementById('outAdd').addEventListener('click', () => addOutRow());
+      ['outTank', 'outTankGal'].forEach(id => document.getElementById(id).addEventListener('input', () => recalc()));
+
+      function outState() {
+        let gal = 0, bad = false; const parts = [];
+        outRows.querySelectorAll('.out-row').forEach(r => {
+          const sel = r.querySelector('.out-pkg'), q = r.querySelector('.out-qty').value;
+          const n = parseFloat(q) || 0, vol = sel.value ? Number(sel.selectedOptions[0].dataset.vol) : 0;
+          r.querySelector('.out-gal').textContent = sel.value && n ? '= ' + fmt(n * vol) + ' gal' : '';
+          if ((sel.value && !q) || (!sel.value && q) || (q && (n <= 0 || !Number.isInteger(n)))) bad = true;
+          if (sel.value && n > 0) { gal += n * vol; parts.push(n + ' x ' + sel.selectedOptions[0].text.replace(/ \(.*\)$/, '')); }
+        });
+        const tSel = document.getElementById('outTank'), tGalRaw = document.getElementById('outTankGal').value;
+        const tGal = parseFloat(tGalRaw) || 0;
+        const note = document.getElementById('outTankNote');
+        note.textContent = '';
+        if (tSel.value || tGalRaw) {
+          if (!tSel.value || tGal <= 0) bad = true;
+          else if (tGal > Number(tSel.selectedOptions[0].dataset.free) + TOL) { bad = true; note.textContent = 'Not enough room in that tank.'; note.className = 'col-md-4 small text-danger'; }
+          else { gal += tGal; parts.push(fmt(tGal) + ' gal into ' + tSel.selectedOptions[0].text.split(' \u2014 ')[0]); note.className = 'col-md-4 small text-muted'; }
+        }
+        return { gal, bad, parts };
+      }
+
+      function updateOutSummary() {
+        if (!plan) return true;
+        const o = outState(), total = Number(plan.total_gal);
+        if (!o.parts.length && !o.bad) { outSummary.innerHTML = ''; return true; }
+        if (o.bad) { outSummary.innerHTML = '<span class="text-danger fw-semibold">Finish each row: pick a package type or tank and enter an amount.</span>'; return false; }
+        if (o.gal > total + TOL) { outSummary.innerHTML = `<span class="text-danger fw-semibold">That's ${fmt(o.gal)} gal but the batch is only ${fmt(total)} gal.</span>`; return false; }
+        outSummary.innerHTML = `<span class="fw-semibold">${fmt(o.gal)} gal placed</span> &middot; ${fmt(total - o.gal)} gal left unpackaged`;
+        return true;
+      }
+
+      // Suggestion: use partial stock first, then full packages (largest first), then open one for the rest.
+      function suggest(tr) {
+        let left = Number(tr.dataset.needed);
+        tr.querySelectorAll('input').forEach(i => i.value = '');
+        tr.querySelector('.src-openpkg').value = '';
+        const tSel = tr.querySelector('.src-tank');
+        if (tSel) {
+          tSel.value = '';
+          // Largest tank first
+          const best = [...tSel.options].slice(1).sort((a, b) => Number(b.dataset.fill) - Number(a.dataset.fill))[0];
+          if (best && left > TOL) {
+            const take = Math.min(Number(best.dataset.fill), left);
+            tSel.value = best.value; tr.querySelector('.src-tankgal').value = +take.toFixed(3); left -= take;
+          }
+        }
+        const partial = Math.min(Number(tr.dataset.partialAvail), left);
+        if (partial > TOL) { tr.querySelector('.src-partial').value = +partial.toFixed(3); left -= partial; }
+        const fulls = [...tr.querySelectorAll('.src-full')].sort((a, b) => Number(b.dataset.vol) - Number(a.dataset.vol));
+        for (const i of fulls) {
+          const vol = Number(i.dataset.vol), n = Math.min(Math.floor((left + TOL) / vol), Number(i.dataset.have));
+          if (n > 0) { i.value = n; left -= n * vol; }
+        }
+        if (left > TOL) {
+          const sel = tr.querySelector('.src-openpkg');
+          const used = Object.fromEntries(fulls.map(i => [i.name.split('__')[2], parseFloat(i.value) || 0]));
+          const opt = [...sel.options].slice(1).sort((a, b) => Number(a.dataset.vol) - Number(b.dataset.vol))
+            .find(o => Number(o.dataset.vol) + TOL >= left && used[o.value] < Number(tr.querySelector(`.src-full[name$="__${o.value}"]`)?.dataset.have || 0));
+          if (opt) { sel.value = opt.value; tr.querySelector('.src-opengal').value = +left.toFixed(3); }
+        }
+        recalc();
+      }
+
+      const errPanel = document.getElementById('execErrors');
+      const errList = document.getElementById('execErrorList');
+
+      function showErrors(errors) {
+        body.querySelectorAll('tr').forEach(tr => tr.classList.remove('table-danger'));
+        if (!errors || !errors.length) { errPanel.classList.add('d-none'); errList.innerHTML = ''; return; }
+        errList.innerHTML = errors.map(m => '<li>' + esc(m) + '</li>').join('');
+        // Highlight the ingredient rows the messages are about ("Methanol: ...")
+        (plan ? plan.components : []).forEach(c => {
+          if (errors.some(m => m.startsWith(c.name + ':'))) {
+            body.querySelector(`tr[data-pid="${c.product_id}"]`)?.classList.add('table-danger');
+          }
+        });
+        errPanel.classList.remove('d-none');
+        errPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        errPanel.focus({ preventScroll: true });
+      }
+
+      // Execute: check with the server first (nothing changes), so problems show
+      // right here and nothing you typed is lost. Only then confirm and submit.
+      let validated = false;
+      document.getElementById('execForm').addEventListener('submit', async (e) => {
+        if (validated) return;
+        e.preventDefault();
+        if (!plan) return;
+        execBtn.disabled = true;
+        const oldLabel = execBtn.textContent;
+        execBtn.textContent = 'Checking…';
+        let data;
+        try {
+          const res = await fetch('{{ url_for("api_blend_validate") }}', { method: 'POST', body: new FormData(e.target) });
+          data = await res.json();
+        } catch (err) {
+          data = { ok: false, errors: ['Could not reach the server. Check your connection and try again.'] };
+        }
+        execBtn.textContent = oldLabel;
+        execBtn.disabled = false;
+        if (!data.ok) { showErrors(data.errors); return; }
+        showErrors([]);
+        const over = [...body.querySelectorAll('tr')].reduce((s, tr) => s + Math.max(0, rowPulled(tr) - Number(tr.dataset.needed)), 0);
+        const msg = `Execute ${fSel.selectedOptions[0].text}: ${fmt(plan.total_gal)} GAL at ${plan.location}?` +
+          (over > TOL ? `\n\n${fmt(over)} GAL of overage will be logged as a loss.` : '') +
+          (outState().parts.length ? `\n\nFinished blend: ${outState().parts.join(', ')}.` : '') +
+          '\n\nThis updates inventory and package counts.';
+        if (!confirm(msg)) return;
+        validated = true;
+        execBtn.disabled = true;
+        execBtn.textContent = 'Executing…';
+        e.target.submit();
+      });
+
+      [locSel, fSel, unitEl].forEach(el => el.addEventListener('change', schedule));
+      qtyEl.addEventListener('input', schedule);
+      schedule();
+    })();
+  </script>
+
+</div>
+{% endblock %}

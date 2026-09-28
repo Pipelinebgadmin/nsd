@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .container,.container-sm,.container-md,.container-lg,.container-xl,.container-xxl,.container-fluid{
+    max-width:100% !important;width:100% !important;margin-left:0 !important;margin-right:0 !important;
+    padding-left:1.25rem !important;padding-right:1.25rem !important;
+  }
+  .page-title{font-weight:600;}
+  .text-muted-small{color:#6c757d;font-size:.9rem;}
+</style>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2" style="margin-top:-6px;">
+  <h2 class="section-title">Total Inventory Value</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('reports_center') }}">&larr; Report Center</a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header bg-white">Filters</div>
+  <div class="card-body">
+    <form class="row gy-2 gx-2 align-items-end" method="get" action="{{ url_for('report_inventory_value') }}">
+      <div class="col-12 col-md-4">
+        <label class="form-label">Location</label>
+        <select class="form-select" name="location">
+          <option value="ALL" {% if selected_location=='ALL' %}selected{% endif %}>All Locations (Entire Company)</option>
+          {% for loc in locations %}
+            <option value="{{ loc }}" {% if selected_location==loc %}selected{% endif %}>{{ loc }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Start Date</label>
+        <input class="form-control" type="date" name="start_date" value="{{ start_date }}">
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">End Date</label>
+        <input class="form-control" type="date" name="end_date" value="{{ end_date }}">
+      </div>
+      <div class="col-12 col-md-2 d-flex gap-2">
+        <button class="btn btn-primary btn-sm w-100" type="submit">Generate</button>
+      </div>
+    </form>
+    <div class="text-muted-small mt-2">
+      Leave dates blank for current on-hand value. Dates filter which received layers count toward the total.
+    </div>
+  </div>
+</div>
+
+<div class="d-flex justify-content-end mb-3">
+  <a class="btn btn-sm btn-success"
+     href="{{ url_for('report_inventory_value_pdf', location=selected_location, start_date=start_date, end_date=end_date) }}">
+    Download PDF
+  </a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header bg-white fw-semibold">By Location</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Location</th>
+            <th class="text-end">Gallons</th>
+            <th class="text-end">Pounds</th>
+            <th class="text-end">SKUs</th>
+            <th class="text-end">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in data.locations %}
+          <tr>
+            <td>{{ l.location }}</td>
+            <td class="text-end">{{ '%.2f'|format(l.qty_gal) if l.qty_gal else '—' }}</td>
+            <td class="text-end">{{ '%.2f'|format(l.qty_lb) if l.qty_lb else '—' }}</td>
+            <td class="text-end">{{ l.sku_count }}</td>
+            <td class="text-end">${{ '%.2f'|format(l.value) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted p-3">No inventory matches these filters.</td></tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="fw-semibold">
+            <td colspan="4" class="text-end">Grand Total</td>
+            <td class="text-end">${{ '%.2f'|format(data.grand_total) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header bg-white fw-semibold">By Product</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Product</th>
+            <th>Location</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Avg Cost</th>
+            <th class="text-end">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in data.products %}
+          <tr>
+            <td>{{ p.product_name }}</td>
+            <td>{{ p.location }}</td>
+            <td class="text-end">{{ '%.2f'|format(p.qty) }} {{ p.unit|upper }}</td>
+            <td class="text-end">${{ '%.4f'|format(p.avg_cost) }}</td>
+            <td class="text-end">${{ '%.2f'|format(p.value) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted p-3">No inventory matches these filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="text-muted-small mt-3">Generated {{ generated_at }}</div>
+
+{% endblock %}

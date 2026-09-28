@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .container,.container-sm,.container-md,.container-lg,.container-xl,.container-xxl,.container-fluid{
+    max-width:100% !important;width:100% !important;margin-left:0 !important;margin-right:0 !important;
+    padding-left:1.25rem !important;padding-right:1.25rem !important;
+  }
+  .page-title{font-weight:600;}
+  .text-muted-small{color:#6c757d;font-size:.9rem;}
+</style>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2" style="margin-top:-6px;">
+  <h2 class="section-title">Blend Cost (Current)</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('reports_center') }}">&larr; Report Center</a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header bg-white">Filters</div>
+  <div class="card-body">
+    <form class="row gy-2 gx-2 align-items-end" method="get" action="{{ url_for('report_blend_cost') }}">
+      <div class="col-12">
+        <label class="form-label">Formulas <span class="text-muted-small">(leave all unchecked for every formula)</span></label>
+        <div class="d-flex flex-wrap gap-3">
+          {% for f in formulas %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="formula_id" value="{{ f.id }}" id="fid-{{ f.id }}"
+                {% if f.id in selected_ids %}checked{% endif %}>
+              <label class="form-check-label" for="fid-{{ f.id }}">{{ f.name }}</label>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="col-12 col-md-3 mt-2">
+        <button class="btn btn-primary btn-sm w-100" type="submit">Generate</button>
+      </div>
+    </form>
+    <div class="text-muted-small mt-2">
+      Cost is computed from each component's current average unit cost — this updates automatically as costs change.
+    </div>
+  </div>
+</div>
+
+<div class="d-flex justify-content-end mb-3">
+  <a class="btn btn-sm btn-success"
+     href="{{ url_for('report_blend_cost_pdf', formula_id=selected_ids) }}">
+    Download PDF
+  </a>
+</div>
+
+{% for f in data %}
+<div class="card mb-3">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">{{ f.formula_name }}</span>
+    <span class="fw-semibold">${{ '%.4f'|format(f.cost_per_gal) }} / gal</span>
+  </div>
+  <div class="card-body p-0">
+    {% if f.missing_products %}
+      <div class="alert alert-warning m-3 mb-0">
+        Missing component product(s), excluded from this cost: {{ f.missing_products|join(', ') }}
+      </div>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Component</th>
+            <th class="text-end">Percent</th>
+            <th class="text-end">Current Unit Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in f.components %}
+          <tr>
+            <td>{{ c.product_name }}</td>
+            <td class="text-end">{{ '%.2f'|format(c.percent) }}%</td>
+            <td class="text-end">${{ '%.4f'|format(c.unit_cost) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="text-muted p-3">No formulas found. Build one in Blend Builder first.</div>
+{% endfor %}
+
+<div class="text-muted-small mt-3">Generated {{ generated_at }}</div>
+
+{% endblock %}

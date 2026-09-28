@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .bl-table th { font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; color: #475569; font-weight: 700; white-space: nowrap; vertical-align: bottom; }
+  .bl-table td { white-space: nowrap; font-size: .88rem; }
+  .bl-table .pkg-col { background: #fffbeb; text-align: center; }
+  .bl-table .partial-col { background: #ecfeff; text-align: right; }
+  .bl-table .open-col { background: #fef2f2; }
+  .bl-table .tank-col { background: #f0fdf4; }
+  .bl-table tr.first td { border-top: 2px solid #cbd5e1; }
+  .bl-table tr.hl td { background-color: #eff6ff !important; }
+  .bl-over { color: #b45309; font-weight: 600; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="section-title mb-0">Blend Log</h2>
+    <div class="text-muted small">Every executed blend, one row per ingredient.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <input type="search" id="blSearch" class="form-control" placeholder="Search blend, component, location…" style="min-width:260px;">
+    {% if can('blending') or can('blend_builder') %}<a href="{{ url_for('blend_new_page') }}" class="btn btn-primary text-nowrap">New Blend</a>{% endif %}
+  </div>
+</div>
+
+
+<div class="card section-card shadow-sm">
+  {% if log %}
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle bl-table">
+      <thead class="table-light">
+        <tr>
+          <th>#</th><th>Date</th><th>Blend</th><th>Location</th><th>Component</th>
+          <th class="text-end">Needed<br>(GAL)</th>
+          {% for n in pkg_names %}<th class="pkg-col">Full<br>{{ n }}</th>{% endfor %}
+          <th class="tank-col">From tank<br>&middot; gal</th>
+          <th class="partial-col">From partial<br>(GAL)</th>
+          <th class="open-col">Opened package<br>&middot; gal out</th>
+          <th class="text-end">Pulled<br>(GAL)</th>
+          <th class="text-end">Overage<br>(GAL)</th>
+          <th>By</th>
+        </tr>
+      </thead>
+      <tbody id="blBody">
+        {% for b in log %}
+          {% for c in b.components %}
+          {% set full = {} %}
+          {% for f in c.full %}{% set _ = full.update({f.package_name: f.qty}) %}{% endfor %}
+          <tr class="{{ 'first' if loop.first }} {{ 'hl' if highlight == b.number }}"
+              data-search="{{ (b.blend ~ ' ' ~ c.name ~ ' ' ~ b.location ~ ' ' ~ b.number)|lower }}" data-num="{{ b.number }}">
+            <td class="fw-semibold">{% if loop.first %}{{ b.number }}{% endif %}</td>
+            <td>{% if loop.first %}{{ b.date|datetimeformat("%m/%d/%y") }}{% endif %}</td>
+            <td class="fw-semibold">{% if loop.first %}{{ b.blend }}<div class="small text-muted fw-normal">{{ '%g'|format(b.total_gal) }} GAL{% if can('costs') %} &middot; ${{ '%.4f'|format(b.cost_per_gal) }}/GAL{% endif %}</div>{% if b.packaged %}<div class="small text-muted fw-normal">Into {% for p in b.packaged %}{{ p.qty }} x {{ p.package_name }}{{ ", " if not loop.last }}{% endfor %}</div>{% endif %}{% if b.out_tank %}<div class="small text-muted fw-normal">{{ '%g'|format(b.out_tank.gal) }} gal into {{ b.out_tank.name }}</div>{% endif %}{% endif %}</td>
+            <td>{% if loop.first %}{{ b.location }}{% endif %}</td>
+            <td>{{ c.name }}</td>
+            <td class="text-end">{{ '%g'|format(c.needed_gal) }}</td>
+            {% for n in pkg_names %}<td class="pkg-col">{{ full.get(n, '') }}</td>{% endfor %}
+            <td class="tank-col">{% if c.tank %}{{ c.tank.name }} &middot; {{ '%g'|format(c.tank.gal) }}{% endif %}</td>
+            <td class="partial-col">{{ '%g'|format(c.partial_gal) if c.partial_gal else '' }}</td>
+            <td class="open-col">{% if c.opened %}{{ c.opened.package_name }} &middot; {{ '%g'|format(c.opened.gal_out) }}{% endif %}</td>
+            <td class="text-end">{{ '%g'|format(c.pulled_gal) }}</td>
+            <td class="text-end">{% if c.overage_gal %}<span class="bl-over">{{ '%g'|format(c.overage_gal) }}</span>{% endif %}</td>
+            <td class="text-muted">{% if loop.first %}{{ b.by or '' }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body text-muted">No blends executed yet.</div>
+  {% endif %}
+</div>
+
+<script>
+  // Search keeps every row of a matching blend together
+  const blSearch = document.getElementById("blSearch");
+  blSearch && blSearch.addEventListener("input", function () {
+    const q = blSearch.value.trim().toLowerCase();
+    const rows = [...document.querySelectorAll("#blBody tr")];
+    const hits = new Set(rows.filter(r => !q || r.dataset.search.includes(q)).map(r => r.dataset.num));
+    rows.forEach(r => r.style.display = hits.has(r.dataset.num) ? "" : "none");
+  });
+  const hl = document.querySelector("tr.hl");
+  if (hl) hl.scrollIntoView({ block: "center" });
+</script>
+{% endblock %}

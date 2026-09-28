@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<h1>Release Staged Removal</h1>
+
+{% if error %}
+  <div class="errors"><li>{{ error }}</li></div>
+{% endif %}
+
+{% if record %}
+  <div class="card" style="margin-bottom:12px">
+    <div style="margin-bottom:6px"><b>Product:</b> {{ record.get('product_name') }}</div>
+    <div style="margin-bottom:6px"><b>Reserved:</b> {{ "%.4f"|format(record.get('qty_default',0)) }} {{ record.get('default_unit','') }}</div>
+    <div style="margin-bottom:6px"><b>Customer:</b> {{ record.get('customer') or '-' }}</div>
+    <div style="margin-bottom:6px"><b>Reason:</b> {{ record.get('reason') or '-' }}</div>
+    <div style="margin-bottom:6px"><b>Scheduled:</b> {{ record.get('scheduled_date') or '-' }}</div>
+    <div style="margin-bottom:6px"><b>Status:</b> {{ record.get('status') }}</div>
+  </div>
+
+  <form method="POST" action="{{ url_for('staging_release_flow', record_id=record['id']) }}" class="card">
+    <div class="row">
+      <label>Release now?</label>
+      <label style="width:auto"><input type="radio" name="confirm" value="yes" checked> Yes</label>
+      <label style="width:auto"><input type="radio" name="confirm" value="no"> No</label>
+    </div>
+
+    <div class="row">
+      <label for="ship_date">Date</label>
+      <input id="ship_date" name="ship_date" type="date" value="{{ form.get('ship_date','') }}">
+    </div>
+
+    <div class="row">
+      <label for="ship_time">Time</label>
+      <input id="ship_time" name="ship_time" type="time" value="{{ form.get('ship_time','') }}">
+    </div>
+
+    <div class="row">
+      <label for="carrier">Carrier</label>
+      <input id="carrier" name="carrier" placeholder="e.g., UPS, FedEx, Will Call" value="{{ form.get('carrier','') }}">
+    </div>
+
+    <div class="row">
+      <button class="btn success" type="submit">Confirm Release</button>
+      <a class="btn" href="{{ url_for('inventory_adjust_page') }}">Cancel</a>
+    </div>
+  </form>
+{% else %}
+  <p>Record not found.</p>
+  <a class="btn" href="{{ url_for('inventory_adjust_page') }}">Back</a>
+{% endif %}
+
+{% endblock %}

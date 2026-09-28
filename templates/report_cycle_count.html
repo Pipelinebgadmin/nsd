@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .container,.container-sm,.container-md,.container-lg,.container-xl,.container-xxl,.container-fluid{
+    max-width:100% !important;width:100% !important;margin-left:0 !important;margin-right:0 !important;
+    padding-left:1.25rem !important;padding-right:1.25rem !important;
+  }
+  .page-title{font-weight:600;}
+  .text-muted-small{color:#6c757d;font-size:.9rem;}
+</style>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2" style="margin-top:-6px;">
+  <h2 class="section-title">Inventory Cycle Count</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('reports_center') }}">&larr; Report Center</a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header bg-white">Filters</div>
+  <div class="card-body">
+    <form class="row gy-2 gx-2 align-items-end" method="get" action="{{ url_for('report_cycle_count') }}">
+      <div class="col-12 col-md-5">
+        <label class="form-label">Location</label>
+        <select class="form-select" name="location">
+          <option value="ALL" {% if selected_location=='ALL' %}selected{% endif %}>All Locations (Entire Company)</option>
+          {% for loc in locations %}
+            <option value="{{ loc }}" {% if selected_location==loc %}selected{% endif %}>{{ loc }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">How many items</label>
+        <input class="form-control" type="number" min="1" name="count" value="{{ count }}">
+      </div>
+      <div class="col-12 col-md-3">
+        <button class="btn btn-primary btn-sm w-100" type="submit">Randomize</button>
+      </div>
+    </form>
+    <div class="text-muted-small mt-2">
+      Randomizing again generates a new random set. System quantities are intentionally left off the sheet.
+    </div>
+  </div>
+</div>
+
+<div class="d-flex justify-content-end mb-3">
+  <a class="btn btn-sm btn-success"
+     href="{{ url_for('report_cycle_count_pdf', location=selected_location, count=count) }}">
+    Download PDF
+  </a>
+</div>
+
+<div class="card">
+  <div class="card-header bg-white fw-semibold">Count Sheet</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Product</th>
+            <th>Location</th>
+            <th>Counted Qty</th>
+            <th>Unit</th>
+            <th>Counted By</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.product_name }}</td>
+            <td>{{ r.location }}</td>
+            <td>________________</td>
+            <td>{{ r.default_unit|upper }}</td>
+            <td>________________</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted p-3">No items match these filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="text-muted-small mt-3">Generated {{ generated_at }}</div>
+
+{% endblock %}

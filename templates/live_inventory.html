@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .live-wrap { max-width: 1400px; margin: 0 auto; padding: 0 24px; }
+  .live-wrap .section-title { margin: 0 0 16px; }
+
+  .adjust-shell { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; background: #fff; }
+
+  .adjust-tabs {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc;
+    padding: 0 6px;
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .adjust-tabs .tab-btn {
+    border-radius: 0;
+    border: 0;
+    background: transparent;
+    padding: 14px 18px;
+    font-weight: 600;
+    color: #6b7280;
+    position: relative;
+  }
+  .adjust-tabs .tab-btn:hover { color: #0f172a; }
+  .adjust-tabs .tab-btn.active { color: #0d6efd; }
+  .adjust-tabs .tab-btn.active::after {
+    content: "";
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 0;
+    height: 2px;
+    background: #0d6efd;
+  }
+  .adjust-tabs .tab-spacer { flex: 1; }
+  .adjust-tabs .tab-back { margin: 8px 8px 8px 0; }
+
+  .loc-panel-wrap { padding: 18px; min-height: 200px; }
+
+  .loc-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 160px;
+    color: #94a3b8;
+    font-size: .9rem;
+    text-align: center;
+  }
+
+  .loc-inv-table tbody tr { cursor: pointer; }
+  .loc-inv-table tbody tr:hover { background-color: #f8fbff; }
+
+  .loc-panel-note {
+    color: #6b7280;
+    font-size: .85rem;
+    margin-bottom: 12px;
+  }
+</style>
+
+<div class="live-wrap">
+
+  <h2 class="section-title">Live Inventory</h2>
+
+  <div class="adjust-shell">
+    <div class="adjust-tabs loc-tabs" id="locTabs">
+      {% for loc in locations %}
+        <button type="button" class="btn tab-btn loc-tab-btn" id="locTab-{{ loc['id'] }}"
+                onclick="showLocation('{{ loc['id'] }}')">{{ loc['name'] }}</button>
+      {% endfor %}
+      <div class="tab-spacer"></div>
+      <a class="btn tab-back" href="{{ url_for('inventory_adjust_page') }}" data-win data-win-title="Adjust Inventory">Adjust Inventory</a>
+    </div>
+
+    <div class="loc-panel-wrap">
+      <div class="loc-panel-note" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>Click a product below to jump to Adjust Inventory with it pre-selected.</span>
+        <div class="unit-toggle" style="display:inline-flex; border:1px solid #e2e8f0; border-radius:999px; overflow:hidden; flex-shrink:0;">
+          <button type="button" id="unitToggleGal" class="unit-toggle-btn active"
+                  onclick="setLocDisplayUnit('gal')"
+                  style="border:0; padding:4px 12px; font-size:.8rem; font-weight:600; cursor:pointer; background:#334155; color:#fff;">
+            GAL
+          </button>
+          <button type="button" id="unitToggleLb" class="unit-toggle-btn"
+                  onclick="setLocDisplayUnit('lb')"
+                  style="border:0; padding:4px 12px; font-size:.8rem; font-weight:600; cursor:pointer; background:#f8fafc; color:#334155;">
+            LB
+          </button>
+        </div>
+      </div>
+      <div id="locPanelBody">
+        <div class="loc-empty">Select a location to see what's on hand.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ── Package definitions passed from Flask ──
+  const PKG_OPTIONS = [
+    {% if packages %}
+      {% for pk in packages %}
+        { id: "{{ pk.id }}", name: {{ pk.name | tojson }}, volume: {{ pk.volume }}, unit: "{{ pk.unit | upper }}" },
+      {% endfor %}
+    {% endif %}
+  ];
+
+  const LOCATIONS = [
+    {% for loc in locations %}
+      { id: "{{ loc['id'] }}", name: {{ loc['name'] | tojson }} },
+    {% endfor %}
+  ];
+
+  const locInventoryCache = {};
+
+  // GAL / LB toggle for the location panel — lets everything (Total +
+  // Unpackaged) display in one consistent unit, converting via each
+  // product's weight (lb/gal) where possible.
+  let locDisplayUnit = 'gal';
+
+  function setLocDisplayUnit(unit) {
+    locDisplayUnit = unit;
+
+    const galBtn = document.getElementById('unitToggleGal');
+    const lbBtn  = document.getElementById('unitToggleLb');
+    const activeStyle   = { background: '#334155', color: '#fff' };
+    const inactiveStyle = { background: '#f8fafc', color: '#334155' };
+
+    Object.assign(galBtn.style, unit === 'gal' ? activeStyle : inactiveStyle);
+    Object.assign(lbBtn.style,  unit === 'lb'  ? activeStyle : inactiveStyle);
+
+    if (window.activeLocationId && locInventoryCache[window.activeLocationId]) {
+      renderLocationInventory(locInventoryCache[window.activeLocationId]);
+    }
+  }
+
+  // Convert a quantity from a product's own default unit into the
+  // currently selected display unit (gal or lb), using the product's
+  // weight (lb per gal). Returns null if conversion isn't possible
+  // (e.g. 'unit'-tracked products, or missing weight) — caller falls
+  // back to showing the product's native unit in that case.
+  function convertQtyForDisplay(qty, prodUnit, weight, displayUnit) {
+    const u = (prodUnit || '').toLowerCase();
+    const w = Number(weight);
+
+    if (u === displayUnit) return qty;
+
+    if (u === 'gal' && displayUnit === 'lb') {
+      if (!w || w <= 0) return null;
+      return qty * w;
+    }
+    if (u === 'lb' && displayUnit === 'gal') {
+      if (!w || w <= 0) return null;
+      return qty / w;
+    }
+    // 'unit'-tracked products have no gal/lb equivalent
+    return null;
+  }
+
+  function renderLocationInventory(data) {
+    const body = document.getElementById('locPanelBody');
+    if (!data || !data.products || data.products.length === 0) {
+      body.innerHTML = '<div class="loc-empty">No inventory on hand at this location.</div>';
+      return;
+    }
+
+    // Column headers: one per package type, same style as the Products page
+    // (name on top, volume + unit underneath).
+    let headCols = '';
+    for (const pk of PKG_OPTIONS) {
+      headCols += `
+        <th class="text-nowrap text-center" style="font-size:.8rem;">
+          ${pk.name}<br><span class="text-muted" style="font-size:.75rem;">${pk.volume} ${pk.unit}</span>
+        </th>`;
+    }
+
+    let rows = '';
+    for (const prod of data.products) {
+      const displayUnitLabel = locDisplayUnit.toUpperCase();
+
+      const bulkConverted = convertQtyForDisplay(prod.bulk_qty, prod.unit, prod.weight, locDisplayUnit);
+      const bulkLabel = (bulkConverted !== null && bulkConverted)
+        ? `${Number(bulkConverted).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${displayUnitLabel}`
+        : (prod.bulk_qty
+            ? `${Number(prod.bulk_qty).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${(prod.unit || '').toUpperCase()}`
+            : '<span class="text-muted">—</span>');
+
+      const unpackagedConverted = convertQtyForDisplay(prod.unpackaged_qty, prod.unit, prod.weight, locDisplayUnit);
+      const unpackagedLabel = (unpackagedConverted !== null && unpackagedConverted)
+        ? `${Number(unpackagedConverted).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${displayUnitLabel}`
+        : (prod.unpackaged_qty
+            ? `${Number(prod.unpackaged_qty).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${(prod.unit || '').toUpperCase()}`
+            : '<span class="text-muted">—</span>');
+
+      // Look up this product's per-package quantity by package id, falling
+      // back to matching on package name if an id isn't present.
+      const byId = {};
+      (prod.packages || []).forEach(pk => {
+        if (pk.package_id != null) byId[String(pk.package_id)] = pk.quantity;
+      });
+
+      let pkgCells = '';
+      for (const pk of PKG_OPTIONS) {
+        let qty = byId[String(pk.id)];
+        if (qty === undefined) {
+          const match = (prod.packages || []).find(p => p.package_name === pk.name);
+          qty = match ? match.quantity : undefined;
+        }
+        pkgCells += `<td class="font-monospace text-center">${
+          (qty && qty > 0) ? Math.trunc(qty) : '<span class="text-muted">—</span>'
+        }</td>`;
+      }
+
+      rows += `
+        <tr onclick="selectLocationProduct('${prod.product_id}')">
+          <td class="fw-semibold">${prod.product_name}</td>
+          <td class="font-monospace">${bulkLabel}</td>
+          <td class="font-monospace text-muted">${unpackagedLabel}</td>
+          ${pkgCells}
+        </tr>`;
+    }
+
+    body.innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle loc-inv-table">
+          <thead class="table-light">
+            <tr>
+              <th>Product</th>
+              <th class="text-nowrap">Total</th>
+              <th class="text-nowrap">Unpackaged</th>
+              ${headCols}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function showLocation(locationId) {
+    document.querySelectorAll('.loc-tab-btn').forEach(btn => btn.classList.remove('active'));
+    const activeBtn = document.getElementById(`locTab-${locationId}`);
+    if (activeBtn) activeBtn.classList.add('active');
+
+    window.activeLocationId = locationId;
+
+    if (locInventoryCache[locationId]) {
+      renderLocationInventory(locInventoryCache[locationId]);
+      return;
+    }
+
+    const body = document.getElementById('locPanelBody');
+    body.innerHTML = '<div class="loc-empty">Loading…</div>';
+
+    fetch(`/api/location_inventory/${encodeURIComponent(locationId)}`)
+      .then(r => r.json())
+      .then(data => {
+        locInventoryCache[locationId] = data;
+        renderLocationInventory(data);
+      })
+      .catch(() => {
+        body.innerHTML = '<div class="loc-empty">Could not load inventory for this location.</div>';
+      });
+  }
+
+  // Clicking a product jumps over to Adjust Inventory (Receive tab) with
+  // this product and location pre-selected via query string, since the
+  // adjustment form now lives on its own page.
+  function selectLocationProduct(productId) {
+    const loc = window.activeLocationId || '';
+    const url = `{{ url_for('inventory_adjust_page') }}?product_id=${encodeURIComponent(productId)}&location_id=${encodeURIComponent(loc)}`;
+    if (window.openWindow) {
+      window.openWindow(url, 'Adjust Inventory');
+    } else {
+      window.location.href = url;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    if (LOCATIONS.length > 0) {
+      showLocation(LOCATIONS[0].id);
+    }
+  });
+</script>
+
+{% endblock %}

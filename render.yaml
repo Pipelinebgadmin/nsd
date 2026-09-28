@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: nstock
+    runtime: python
+    plan: starter            # persistent disks need a paid plan
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    healthCheckPath: /login
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: NSTOCK_HTTPS
+        value: "1"
+      - key: NSTOCK_DATA_DIR
+        value: /var/data
+    disk:
+      name: nstock-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}NStock — Formula Information{% endblock %}
+
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+<div class="container my-4">
+
+  <style>
+    .k { font-size:.9rem; color:#6c757d; }
+    .section-card { border-radius:0; }
+  </style>
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h2 class="section-title mb-0">Formula Information</h2>
+      <div class="k">
+        Mode: <strong>{{ (form.mode or "percent")|capitalize }}</strong>
+        • Components: <strong>{{ (form.components or [])|length }}</strong>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary"
+         href="{{ url_for('formulas_page') }}">
+        Back to Catalog
+      </a>
+    </div>
+  </div>
+
+  <!-- Flash Messages -->
+
+  <!-- ========================= -->
+  <!-- Main Edit Card -->
+  <!-- ========================= -->
+  <div class="card section-card shadow-sm">
+    <div class="card-header bg-white">
+      <div class="h6 mb-0">Edit Formula</div>
+    </div>
+
+    <div class="card-body">
+
+      <form method="POST"
+            action="/formulas/{{ form.id }}/update_percent"
+            class="row g-3"
+            id="formulaForm">
+
+        <!-- Name -->
+        <div class="col-12 col-md-6">
+          <label class="form-label">Formula Name</label>
+          <input name="name"
+                 class="form-control"
+                 value="{{ form.name or '' }}"
+                 required />
+        </div>
+
+        <!-- Mode (readonly for now) -->
+        <div class="col-12 col-md-6">
+          <label class="form-label">Mode</label>
+          <input class="form-control"
+                 value="{{ (form.mode or 'percent')|capitalize }}"
+                 disabled />
+        </div>
+
+        <!-- Description -->
+        <div class="col-12">
+          <label class="form-label">Description</label>
+          <input name="description"
+                 class="form-control"
+                 value="{{ form.description or '' }}" />
+        </div>
+
+        <!-- Defaults -->
+        <div class="col-12 col-md-6">
+          <label class="form-label">Default Target Quantity</label>
+          <input name="target_qty"
+                 type="number"
+                 step="0.0001"
+                 min="0"
+                 class="form-control"
+                 value="{{ (form.defaults.target_qty if form.defaults else '') or '' }}" />
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label">Default Target Unit</label>
+          {% set tu = (form.defaults.target_unit if form.defaults else 'gal') or 'gal' %}
+          <select name="target_unit" class="form-select">
+            <option value="gal" {% if tu=='gal' %}selected{% endif %}>GAL</option>
+            <option value="lb" {% if tu=='lb' %}selected{% endif %}>LB</option>
+          </select>
+        </div>
+
+        <!-- ========================= -->
+        <!-- Components -->
+        <!-- ========================= -->
+        <div class="col-12 mt-4">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="fw-semibold">Components</div>
+              <div class="k">Percent mode must equal 100%.</div>
+            </div>
+            <button type="button"
+                    class="btn btn-outline-secondary btn-sm"
+                    id="addRowBtn">
+              + Add Row
+            </button>
+          </div>
+
+          <div class="table-responsive mt-2">
+            <table class="table align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th style="min-width:260px;">Product</th>
+                  <th class="text-end" style="width:180px;">Percent</th>
+                  <th style="width:80px;"></th>
+                </tr>
+              </thead>
+              <tbody id="compBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Save Button -->
+        <div class="col-12 d-flex justify-content-end mt-3">
+          <button class="btn btn-primary" type="submit">
+            Save Changes
+          </button>
+        </div>
+
+      </form>
+
+    </div>
+  </div>
+
+  <!-- ========================= -->
+  <!-- Collapsed Updates Section -->
+  <!-- ========================= -->
+  <div class="accordion mt-4" id="formulaMetaAccordion">
+    <div class="accordion-item">
+      <h2 class="accordion-header">
+        <button class="accordion-button collapsed"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#collapseMeta">
+          Formula Updates & Details
+        </button>
+      </h2>
+
+      <div id="collapseMeta"
+           class="accordion-collapse collapse"
+           data-bs-parent="#formulaMetaAccordion">
+        <div class="accordion-body">
+
+          <div class="k"><strong>ID:</strong> {{ form.id }}</div>
+          <div class="k">
+            <strong>Created:</strong>
+            {{ (form.created_at or "")|datetimeformat }}
+          </div>
+          <div class="k">
+            <strong>Last Updated:</strong>
+            {{ (form.updated_at or "")|datetimeformat }}
+          </div>
+
+          <div class="k mt-2">
+            <strong>Mode:</strong> {{ (form.mode or "percent")|capitalize }}
+          </div>
+
+          <div class="k">
+            <strong>Components Count:</strong>
+            {{ (form.components or [])|length }}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ========================= -->
+<!-- Page JS -->
+<!-- ========================= -->
+<script>
+  const PRODUCTS = {{ (products or []) | tojson }};
+  const FORM = {{ (form or {}) | tojson }};
+
+  function productOptions(selectedId){
+    const opts = ['<option value="" disabled>Select product…</option>'];
+    PRODUCTS.forEach(p => {
+      const sel = String(p.id) === String(selectedId) ? 'selected' : '';
+      opts.push(`<option value="${p.id}" ${sel}>${p.name}</option>`);
+    });
+    return opts.join('');
+  }
+
+  function addRow(prefill = {}) {
+    const tbody = document.getElementById('compBody');
+    const tr = document.createElement('tr');
+
+    const tdProd = document.createElement('td');
+    const sel = document.createElement('select');
+    sel.name = 'product_id[]';
+    sel.className = 'form-select';
+    sel.innerHTML = productOptions(prefill.product_id || '');
+    if (prefill.product_id) sel.value = prefill.product_id;
+    tdProd.appendChild(sel);
+
+    const tdPct = document.createElement('td');
+    tdPct.className = 'text-end';
+    const pct = document.createElement('input');
+    pct.name = 'percent[]';
+    pct.type = 'number';
+    pct.step = '0.0001';
+    pct.min = '0';
+    pct.className = 'form-control text-end';
+    pct.value = prefill.percent ?? '';
+    tdPct.appendChild(pct);
+
+    const tdDel = document.createElement('td');
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn btn-outline-danger btn-sm';
+    del.textContent = '✕';
+    del.onclick = () => tr.remove();
+    tdDel.appendChild(del);
+
+    tr.appendChild(tdProd);
+    tr.appendChild(tdPct);
+    tr.appendChild(tdDel);
+
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('addRowBtn')
+    .addEventListener('click', () => addRow({}));
+
+  // Prefill rows
+  (FORM.components || []).forEach(c => addRow(c));
+
+  if (!(FORM.components || []).length) addRow({});
+</script>
+
+{% endblock %}

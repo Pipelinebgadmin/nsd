@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .fb-wrap { max-width: 980px; margin: 0 auto; }
+  .fb-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .fb-head h2 { margin: 0; }
+  .fb-sub { color: #64748b; font-size: .9rem; margin-top: 2px; }
+  .fb-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 18px; }
+  .fb-card-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; }
+  .fb-card-head h6 { margin: 0; font-weight: 700; }
+  .fb-card-body { padding: 18px; }
+  .fb-table th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #64748b; font-weight: 700; border-bottom-width: 1px; }
+  .fb-table td { vertical-align: middle; }
+  .fb-remove { width: 34px; height: 34px; padding: 0; border-radius: 8px; line-height: 1; font-size: 1.1rem; }
+  .fb-total-row td { border-top: 2px solid #e2e8f0; font-weight: 700; }
+  .fb-total.ok { color: #15803d; }
+  .fb-total.bad { color: #b91c1c; }
+  .fb-bar { height: 6px; background: #f1f5f9; border-radius: 99px; overflow: hidden; margin-top: 6px; }
+  .fb-bar > div { height: 100%; width: 0; background: #2563eb; transition: width .2s, background .2s; }
+  .fb-stat { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; height: 100%; }
+  .fb-stat .k { color: #64748b; font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .fb-stat .v { font-size: 1.35rem; font-weight: 700; color: #0f172a; margin-top: 4px; }
+  .fb-stat .e { color: #b91c1c; font-size: .8rem; margin-top: 4px; }
+  .fb-actions { display: flex; justify-content: flex-end; gap: 10px; }
+</style>
+
+<div class="fb-wrap">
+  <div class="fb-head">
+    <div>
+      <h2 class="section-title">New Formula</h2>
+      <div class="fb-sub">Pick the components and their percentages. They must add up to 100%.</div>
+    </div>
+    <a href="{{ url_for('formulas_page') }}" class="btn btn-outline-secondary">Back to Catalog</a>
+  </div>
+
+
+  <form method="POST" action="{{ url_for('formulas_create_percent') }}" id="formulaForm">
+
+    <!-- Details -->
+    <div class="fb-card">
+      <div class="fb-card-head"><h6>Details</h6></div>
+      <div class="fb-card-body row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="fName">Formula name</label>
+          <input id="fName" name="name" class="form-control" required maxlength="120" placeholder="e.g. 40% Methanol Blend">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="fUnit">Percentages are by</label>
+          <select id="fUnit" name="target_unit" class="form-select">
+            <option value="gal" selected>Volume (GAL)</option>
+            <option value="lb">Weight (LB)</option>
+          </select>
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="fDesc">Description <span class="text-muted">(optional)</span></label>
+          <input id="fDesc" name="description" class="form-control" maxlength="300" placeholder="What it's for, customer, notes…">
+        </div>
+      </div>
+    </div>
+
+    <!-- Components -->
+    <div class="fb-card">
+      <div class="fb-card-head">
+        <h6>Components</h6>
+        <button type="button" class="btn btn-sm btn-outline-primary" id="addRowBtn">+ Add Component</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table mb-0 fb-table">
+          <thead>
+            <tr>
+              <th style="padding-left:18px;">Product</th>
+              <th style="width:200px;">Percent</th>
+              <th style="width:70px;"></th>
+            </tr>
+          </thead>
+          <tbody id="rowsBody"></tbody>
+          <tfoot>
+            <tr class="fb-total-row">
+              <td style="padding-left:18px;">Total</td>
+              <td>
+                <span class="fb-total bad" id="totalPctCell">0.000%</span>
+                <div class="fb-bar"><div id="totalBar"></div></div>
+              </td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="px-3 pb-3 pt-2 small text-muted" id="totalHint">Percentages must add up to 100%.</div>
+    </div>
+
+    <!-- Estimates -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <div class="fb-stat">
+          <div class="k">Estimated weight</div>
+          <div class="v" id="lbPerGalText">—</div>
+          <div class="small text-muted">Weight of 1 gallon of this formula</div>
+          <div class="e" id="lbPerGalErr"></div>
+        </div>
+      </div>
+
+      {% if can('costs') %}      <div class="col-md-6">
+        <div class="fb-stat">
+          <div class="k">Estimated cost</div>
+          <div class="v" id="costText">—</div>
+          <div class="small text-muted" id="costSub">Cost to make 1 unit at current FIFO costs</div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="fb-actions">
+      <a href="{{ url_for('formulas_page') }}" class="btn btn-outline-secondary">Cancel</a>
+      <button type="submit" class="btn btn-primary" id="saveBtn">Save Formula</button>
+    </div>
+  </form>
+</div>
+
+<script>
+  const products = {{ products|tojson }};
+  const tbody = document.getElementById("rowsBody");
+  const totalCell = document.getElementById("totalPctCell");
+  const totalBar = document.getElementById("totalBar");
+  const totalHint = document.getElementById("totalHint");
+  const unitSel = document.getElementById("fUnit");
+  const lbPerGalText = document.getElementById("lbPerGalText");
+  const lbPerGalErr = document.getElementById("lbPerGalErr");
+  const costText = document.getElementById("costText") || document.createElement("div");
+  const costSub = document.getElementById("costSub") || document.createElement("div");
+  let computeTimer = null;
+
+  function buildComponentsPayload() {
+    const comps = [];
+    tbody.querySelectorAll("tr").forEach(tr => {
+      const pid = (tr.querySelector('select[name="product_id[]"]')?.value || "").trim();
+      const pv = parseFloat(tr.querySelector('input[name="percent[]"]')?.value || "0");
+      if (pid && !isNaN(pv) && pv > 0) comps.push({ product_id: pid, percent: pv });
+    });
+    return comps;
+  }
+
+  async function computeEstimates() {
+    lbPerGalErr.textContent = "";
+    const comps = buildComponentsPayload();
+    const unit = unitSel.value;
+    if (!comps.length) { lbPerGalText.textContent = "—"; costText.textContent = "—"; return; }
+    try {
+      const res = await fetch("/api/formulas/compute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "percent", target_unit: unit, target_qty: 1, components: comps })
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        lbPerGalText.textContent = "—"; costText.textContent = "—";
+        lbPerGalErr.textContent = (data.errors || ["Could not calculate."]).join(" ");
+        return;
+      }
+      const v = Number(data.lb_per_gal || 0);
+      lbPerGalText.textContent = (isFinite(v) && v > 0) ? v.toFixed(4) + " LB/GAL" : "—";
+      const c = data.cost_per_unit;
+      costText.textContent = (c === null || c === undefined) ? "—" : "$" + Number(c).toFixed(2) + " / " + (data.cost_unit || unit).toUpperCase();
+      costSub.textContent = "Cost to make 1 " + (data.cost_unit || unit).toUpperCase() + " at current FIFO costs";
+    } catch (e) {
+      lbPerGalText.textContent = "—"; costText.textContent = "—";
+      lbPerGalErr.textContent = "Could not calculate right now.";
+    }
+  }
+
+  function markDuplicates() {
+    const seen = {};
+    tbody.querySelectorAll('select[name="product_id[]"]').forEach(sel => {
+      sel.classList.remove("is-invalid");
+      if (!sel.value) return;
+      if (seen[sel.value]) { sel.classList.add("is-invalid"); seen[sel.value].classList.add("is-invalid"); }
+      else seen[sel.value] = sel;
+    });
+    return tbody.querySelectorAll("select.is-invalid").length > 0;
+  }
+
+  function recalcTotal() {
+    let total = 0;
+    tbody.querySelectorAll('input[name="percent[]"]').forEach(i => {
+      const v = parseFloat(i.value || "0");
+      if (!isNaN(v)) total += v;
+    });
+    const ok = Math.abs(total - 100) < 0.001;
+    totalCell.textContent = total.toFixed(3) + "%";
+    totalCell.className = "fb-total " + (ok ? "ok" : "bad");
+    totalBar.style.width = Math.min(total, 100) + "%";
+    totalBar.style.background = ok ? "#16a34a" : (total > 100 ? "#dc2626" : "#2563eb");
+    const dup = markDuplicates();
+    if (dup) totalHint.textContent = "The same product is listed twice. Combine them into one row.";
+    else if (ok) totalHint.textContent = "Adds up to 100%. Ready to save.";
+    else if (total > 100) totalHint.textContent = "Over by " + (total - 100).toFixed(3) + "%. Percentages must add up to 100%.";
+    else totalHint.textContent = (100 - total).toFixed(3) + "% left to assign. Percentages must add up to 100%.";
+
+    if (computeTimer) clearTimeout(computeTimer);
+    computeTimer = setTimeout(computeEstimates, 250);
+  }
+
+  function addRow(pid = "", pct = "") {
+    const tr = document.createElement("tr");
+
+    const tdProd = document.createElement("td");
+    tdProd.style.paddingLeft = "18px";
+    const sel = document.createElement("select");
+    sel.name = "product_id[]";
+    sel.required = true;
+    sel.className = "form-select";
+    sel.setAttribute("aria-label", "Product");
+    sel.innerHTML = '<option value="">Select a product…</option>';
+    products.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    sel.value = pid;
+    sel.addEventListener("change", recalcTotal);
+    tdProd.appendChild(sel);
+
+    const tdPct = document.createElement("td");
+    const group = document.createElement("div");
+    group.className = "input-group";
+    const inp = document.createElement("input");
+    inp.name = "percent[]";
+    inp.type = "number";
+    inp.step = "any";
+    inp.min = "0";
+    inp.max = "100";
+    inp.required = true;
+    inp.className = "form-control text-end";
+    inp.placeholder = "0";
+    inp.setAttribute("aria-label", "Percent");
+    inp.value = pct;
+    inp.addEventListener("input", recalcTotal);
+    const suffix = document.createElement("span");
+    suffix.className = "input-group-text";
+    suffix.textContent = "%";
+    group.appendChild(inp);
+    group.appendChild(suffix);
+    tdPct.appendChild(group);
+
+    const tdAct = document.createElement("td");
+    tdAct.className = "text-end pe-3";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn btn-outline-danger fb-remove";
+    del.innerHTML = "&times;";
+    del.title = "Remove";
+    del.setAttribute("aria-label", "Remove component");
+    del.addEventListener("click", () => {
+      tr.remove();
+      if (!tbody.children.length) addRow();
+      recalcTotal();
+    });
+    tdAct.appendChild(del);
+
+    tr.append(tdProd, tdPct, tdAct);
+    tbody.appendChild(tr);
+    recalcTotal();
+    return sel;
+  }
+
+  document.getElementById("addRowBtn").addEventListener("click", () => addRow().focus());
+  unitSel.addEventListener("change", recalcTotal);
+
+  document.getElementById("formulaForm").addEventListener("submit", (e) => {
+    let total = 0;
+    tbody.querySelectorAll('input[name="percent[]"]').forEach(i => { total += parseFloat(i.value || "0") || 0; });
+    if (markDuplicates()) { e.preventDefault(); alert("The same product is listed twice. Combine them into one row."); return; }
+    if (Math.abs(total - 100) >= 0.001) { e.preventDefault(); alert("Percentages must add up to 100%. Right now they total " + total.toFixed(3) + "%."); }
+  });
+
+  addRow();
+  addRow();
+</script>
+{% endblock %}

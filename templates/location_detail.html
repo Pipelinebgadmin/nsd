@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<style>
+  /* Scoped ONLY to Location Detail page */
+  .loc-detail .topbar{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-top:-6px;
+  }
+  .loc-detail .subtitle{
+    color:#6b7280;
+    font-size:.9rem;
+    margin-top:2px;
+  }
+  .loc-detail .actions{
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  .loc-detail .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 10px;
+    border:1px solid #e2e8f0;
+    border-radius: 999px;
+    background:#f8fafc;
+    color:#334155;
+    font-size:.85rem;
+    white-space:nowrap;
+  }
+</style>
+
+<div class="loc-detail">
+
+  <div class="topbar">
+    <div>
+      <h2 class="section-title" style="margin:0;">
+        {{ location_name }}
+      </h2>
+      {% if location_address %}
+        <div class="subtitle">{{ location_address }}</div>
+      {% else %}
+        <div class="subtitle">—</div>
+      {% endif %}
+    </div>
+
+    <div class="actions">
+      <a class="btn btn-outline-secondary" href="{{ url_for('locations_page') }}">Back</a>
+      <a class="btn btn-primary" href="{{ url_for('inventory_adjust_page', next=request.path) }}">
+        Adjust Inventory
+      </a>
+      <a class="btn btn-primary"
+        href="{{ url_for('edit_location', location_id=location_id) }}">
+        Edit Location
+      </a>
+    </div>
+  </div>
+
+  <!-- Summary pills -->
+  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+{% if can('costs') %}<div class="pill">Location total value: <strong>${{ '%.2f'|format((kpis.total_value if kpis is mapping else kpis.total_value) or 0) }}</strong></div>{% endif %}
+    <div class="pill">Gallons: <strong>{{ '%.2f'|format((kpis.total_gallons if kpis is mapping else kpis.total_gallons) or 0) }}</strong></div>
+    <div class="pill">Pounds: <strong>{{ '%.2f'|format((kpis.total_pounds if kpis is mapping else kpis.total_pounds) or 0) }}</strong></div>
+    <div class="pill">Products: <strong>{{ (kpis.sku_count if kpis is mapping else kpis.sku_count) or 0 }}</strong></div>
+    {% if all_packages %}
+      <div class="pill">Unpackaged: <strong>{{ '%.2f'|format((kpis.total_unpackaged_gal if kpis is mapping else kpis.total_unpackaged_gal) or 0) }} GAL</strong></div>
+    {% endif %}
+  </div>
+
+  <!-- Tanks (Sublocations) -->
+  <div class="card" style="margin-top:12px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <div style="font-weight:700;">Tanks</div>
+
+      {% if location_id %}
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <a class="btn btn-outline-secondary btn-sm"
+             href="{{ url_for('tanks_page', location_id=location_id) }}">
+            View Tanks
+          </a>
+          <a class="btn btn-primary btn-sm"
+             href="{{ url_for('add_tank', location_id=location_id) }}">
+            Add Tank
+          </a>
+        </div>
+      {% endif %}
+    </div>
+
+    {% if tanks and tanks|length > 0 %}
+      <div class="table-responsive" style="margin-top:10px;">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="min-width:220px;">Tank</th>
+              <th class="text-end">Capacity (gal)</th>
+              <th class="text-end">Fill (gal)</th>
+              <th class="text-end">% Full</th>
+              <th style="min-width:200px;">Product</th>
+              <th class="text-end">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in tanks %}
+              <tr>
+                <td>
+                  <div style="font-weight:600;">{{ t.name }}</div>
+                  <div class="text-muted-small">ID: {{ t.id }}</div>
+                </td>
+                <td class="text-end">{{ '%.0f'|format(t.capacity_gal or 0) }}</td>
+                <td class="text-end">{{ '%.0f'|format(t.fill_gal or 0) }}</td>
+                <td class="text-end">{{ '%.0f'|format((t.pct_full or 0) * 100) }}%</td>
+                <td>
+                  {% if t.assigned_product_name %}
+                    <div style="font-weight:600;">{{ t.assigned_product_name }}</div>
+                    <div class="text-muted-small">Product ID: {{ t.assigned_product_id }}</div>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  {% set s = (t.status or '') %}
+                  {% if s == 'full' %}
+                    <span class="badge bg-danger">FULL</span>
+                  {% elif s == 'near_full' %}
+                    <span class="badge bg-warning text-dark">NEAR FULL</span>
+                  {% elif s == 'near_empty' %}
+                    <span class="badge bg-warning text-dark">NEAR EMPTY</span>
+                  {% elif s == 'empty' %}
+                    <span class="badge bg-secondary">EMPTY</span>
+                  {% else %}
+                    <span class="badge bg-success">OK</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted" style="margin-top:10px;">
+        No tanks created yet for this location.
+      </div>
+
+      {% if location_id %}
+        <div style="margin-top:8px;">
+          <a class="btn btn-primary btn-sm"
+             href="{{ url_for('add_tank', location_id=location_id) }}">
+            Add your first tank
+          </a>
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <!-- Products at this location -->
+  <div class="card" style="margin-top:12px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <div style="font-weight:700;">Products at this location</div>
+      <div class="text-muted-small">
+        Showing {{ (items|length) if items else 0 }} item(s)
+      </div>
+    </div>
+
+    <div class="table-responsive" style="margin-top:10px;">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th style="min-width:240px;">Product</th>
+            <th class="text-end">Qty @ Location</th>
+            <th class="text-end">Unit</th>
+            <th class="text-end text-nowrap">Total Gallons</th>
+            <th class="text-end text-nowrap">Total Pounds</th>
+            {% for pkg in all_packages %}
+              <th class="text-nowrap text-center" style="font-size:.8rem;">
+                {{ pkg.name }}<br>
+                <span class="text-muted" style="font-size:.75rem;">{{ pkg.volume }} {{ pkg.unit | upper }}</span>
+              </th>
+            {% endfor %}
+            {% if all_packages %}
+              <th class="text-nowrap text-center" style="font-size:.8rem;">Unpackaged<br><span class="text-muted" style="font-size:.75rem;">GAL</span></th>
+            {% endif %}
+{% if can('costs') %}
+            <th class="text-end">Avg Cost</th>
+            <th class="text-end">Value @ Location</th>
+            {% endif %}
+            <th class="text-end">Last Updated</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if items and items|length > 0 %}
+            {% for row in items %}
+              {% set psummary = pkg_summaries.get(row.id|string, {}) %}
+              <tr>
+                <td>
+                  <div style="font-weight:600;">{{ row.name }}</div>
+                  <div class="text-muted-small">ID: {{ row.id }}</div>
+                </td>
+                <td class="text-end">{{ '%.4f'|format(row.qty or 0) }}</td>
+                <td class="text-end">{{ (row.unit or '')|upper }}</td>
+                <td class="text-end font-monospace">{{ '{:,.2f}'.format(row.gallons) if row.gallons is not none else '—' }}</td>
+                <td class="text-end font-monospace">{{ '{:,.2f}'.format(row.pounds) if row.pounds is not none else '—' }}</td>
+                {% for pkg in all_packages %}
+                  {% set pkgdata = psummary.get('by_package', {}).get(pkg.id|string, {}) %}
+                  <td class="font-monospace text-center">
+                    {% if pkgdata and pkgdata.quantity > 0 %}
+                      {{ pkgdata.quantity | int }}
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                {% endfor %}
+                {% if all_packages %}
+                  <td class="font-monospace text-center text-muted">
+                    {% set unpackaged = psummary.get('unpackaged_gal', none) %}
+                    {{ unpackaged if unpackaged is not none else '—' }}
+                  </td>
+                {% endif %}
+{% if can('costs') %}
+                <td class="text-end">${{ '%.4f'|format(row.unit_cost or 0) }}</td>
+                <td class="text-end">${{ '%.2f'|format(row.value or 0) }}</td>
+                {% endif %}
+                <td class="text-end">
+                  {% set dt = row.last_updated %}
+                  {{ dt and dt|datetimeformat("%m/%d/%y - %H:%M") or "—" }}
+                </td>
+                <td class="text-end">
+                  <a class="btn btn-outline-secondary btn-sm"
+                     href="{{ url_for('product_detail', product_id=row.id) }}">
+                    View
+                  </a>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="{{ (9 if can('costs') else 7) + (all_packages|length if all_packages else 0) + (1 if all_packages else 0) }}" class="text-center text-muted">
+                No products assigned to this location yet.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="height:1px; background:#e5e7eb; margin:18px 0;"></div>
+
+  <h3 class="section-title" style="margin-top: 0;">Adjust Inventory</h3>
+
+  <div class="card section-card shadow-sm">
+    <div class="card-body" style="padding:0;">
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          onclick="setTool('adjust')">
+          Adjust Inventory
+        </button>
+
+        <button
+          type="button"
+          class="btn btn-outline-secondary btn-sm"
+          onclick="setTool('blend')">
+          Blend Builder
+        </button>
+
+      </div>
+      <iframe
+        id="tool-frame"
+        sandbox="allow-forms allow-scripts allow-same-origin"
+        src="{{ url_for('inventory_adjust_page') }}?location_id={{ location_id }}&embed=1"
+        style="width:100%; height:980px; border:0; border-radius:12px;"
+      ></iframe>
+    </div>
+  </div>
+
+  <!-- Optional: recent FIFO layers at this location -->
+  {% if recent_layers and recent_layers|length > 0 %}
+  <div class="card" style="margin-top:12px;">
+    <div style="font-weight:700; margin-bottom:8px;">Recent receives / layers</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Unit</th>
+{% if can('costs') %}<th class="text-end">Unit Cost</th>{% endif %}
+            <th class="text-end">Received</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in recent_layers %}
+          <tr>
+            <td>{{ l.product_name }}</td>
+            <td class="text-end">{{ '%.4f'|format(l.qty or 0) }}</td>
+            <td class="text-end">{{ (l.unit or '')|upper }}</td>
+{% if can('costs') %}<td class="text-end">${{ '%.4f'|format(l.unit_cost or 0) }}</td>{% endif %}
+            <td class="text-end">
+              {% set dt = (l.get('datetime') if l is mapping else l.datetime) %}
+              {{ dt and dt|datetimeformat("%m/%d/%y - %H:%M") or "—" }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<script>
+function setTool(tool){
+  const frame = document.getElementById("tool-frame");
+
+  const urls = {
+
+      adjust: "{{ url_for('inventory_adjust_page') }}?location_id={{ location_id }}&embed=1",
+
+      blend: "{{ url_for('blend_new_page') }}?location_id={{ location_id }}&embed=1"
+
+  }
+
+  frame.src = urls[tool] || urls.adjust;
+}
+</script>
+
+{% endblock %}

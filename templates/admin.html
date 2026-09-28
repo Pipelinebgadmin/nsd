@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Admin &middot; Users</h4>
+  <button class="btn btn-primary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#addUser">
+    + Add User
+  </button>
+</div>
+
+{% if error %}<div class="alert alert-danger py-2">{{ error }}</div>{% endif %}
+
+<div class="collapse {% if error %}show{% endif %} mb-4" id="addUser">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <h6 class="mb-3">New User</h6>
+      <form method="POST" class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label small mb-1">First name</label>
+          <input name="first_name" class="form-control" value="{{ form.get('first_name', '') }}" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Last name</label>
+          <input name="last_name" class="form-control" value="{{ form.get('last_name', '') }}" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Username</label>
+          <input name="username" class="form-control" value="{{ form.get('username', '') }}"
+                 autocomplete="off" autocapitalize="none" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Role</label>
+          <select name="role" class="form-select">
+            {% for r in roles %}
+              <option value="{{ r }}" {% if form.get('role', 'user') == r %}selected{% endif %}>{{ r|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Email</label>
+          <input name="email" type="email" class="form-control" value="{{ form.get('email', '') }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Phone number</label>
+          <input name="phone" type="tel" class="form-control" value="{{ form.get('phone', '') }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Password</label>
+          <input name="password" type="password" class="form-control" autocomplete="new-password" minlength="8" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small mb-1">Confirm password</label>
+          <input name="confirm" type="password" class="form-control" autocomplete="new-password" minlength="8" required>
+          <div class="form-text">At least 8 characters.</div>
+        </div>
+        <div class="col-12 text-end">
+          <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#addUser">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr><th>Name</th><th>Username</th><th>Role</th><th>Email</th><th>Phone</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr style="cursor:pointer" onclick="window.location='{{ url_for('user_profile', user_id=u.id) }}'"
+            {% if not u.active %}class="text-muted"{% endif %}>
+          <td class="fw-semibold">{{ user_display_name(u) }}</td>
+          <td>{{ u.username }}</td>
+          <td>{{ u.role|capitalize }}</td>
+          <td>{{ u.email or "—" }}</td>
+          <td>{{ u.phone or "—" }}</td>
+          <td>
+            {% if u.active %}<span class="badge bg-success">Active</span>
+            {% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}
+          </td>
+          <td class="text-end">
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('user_profile', user_id=u.id) }}">Open</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<!-- ================= SHEETS ================= -->
+<div class="d-flex justify-content-between align-items-center mt-5 mb-2" id="sheets">
+  <h4 class="mb-0">Sheets</h4>
+</div>
+<p class="text-muted small mb-3">
+  Unlocked sheets can be opened by anyone with Spreadsheet access. Lock a sheet to choose exactly who can open it.
+  Admins can always open every sheet.
+</p>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr><th style="width:30%">Sheet</th><th style="width:20%">Created by</th><th style="width:15%">Status</th><th>Access</th></tr>
+      </thead>
+      <tbody>
+        {% for sh in sheets %}
+        <tr>
+          <td class="fw-semibold">{{ sh.name }}</td>
+          <td class="text-muted small">{{ user_names.get(sh.created_by, "—") }}</td>
+          <td>
+            {% if sh.locked %}<span class="badge bg-dark">🔒 Locked</span>
+            {% else %}<span class="badge bg-light text-dark border">Unlocked</span>{% endif %}
+          </td>
+          <td>
+            <form method="POST" action="{{ url_for('admin_sheet_access', sheet_id=sh.id) }}"
+                  class="sheet-form d-flex justify-content-between align-items-center gap-3">
+              {% set allowed = sh.get('allowed_users', []) %}
+              <div class="d-flex align-items-center gap-3">
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input lock-switch" type="checkbox" role="switch" name="locked" value="1"
+                         id="lock-{{ sh.id }}" {% if sh.locked %}checked{% endif %}>
+                  <label class="form-check-label" for="lock-{{ sh.id }}">Lock this sheet</label>
+                </div>
+                <button type="button" class="btn btn-outline-secondary btn-sm users-btn"
+                        data-bs-toggle="modal" data-bs-target="#users-{{ sh.id }}"
+                        {% if not sh.locked %}disabled title="Lock the sheet to choose users"{% endif %}>
+                  Users (<span class="users-count">{{ sheet_candidates|selectattr('id', 'in', allowed)|list|length }}</span>)
+                </button>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm flex-shrink-0">Save</button>
+
+              <!-- Users popup for this sheet -->
+              <div class="modal fade" id="users-{{ sh.id }}" tabindex="-1" aria-labelledby="users-title-{{ sh.id }}" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+                  <div class="modal-content">
+                    <div class="modal-header">
+                      <h5 class="modal-title" id="users-title-{{ sh.id }}">Who can open “{{ sh.name }}”</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                      {% for u in sheet_candidates %}
+                      <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                        <label class="mb-0" for="su-{{ sh.id }}-{{ u.id }}">
+                          <div class="fw-semibold">{{ user_display_name(u) }}</div>
+                          <div class="small text-muted">{{ u.username }}</div>
+                        </label>
+                        <div class="form-check form-switch mb-0">
+                          <input class="form-check-input user-toggle" type="checkbox" role="switch" name="allowed_users"
+                                 value="{{ u.id }}" id="su-{{ sh.id }}-{{ u.id }}" {% if u.id in allowed %}checked{% endif %}>
+                        </div>
+                      </div>
+                      {% else %}
+                      <div class="text-muted small py-2">No regular users yet. Add them with + Add User above.</div>
+                      {% endfor %}
+                      {% for u in sheet_admins %}
+                      <div class="d-flex justify-content-between align-items-center py-2 border-bottom text-muted">
+                        <div>
+                          <div class="fw-semibold">{{ user_display_name(u) }}</div>
+                          <div class="small">Admin · always has access</div>
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                          <input class="form-check-input" type="checkbox" role="switch" checked disabled
+                                 aria-label="{{ user_display_name(u) }} always has access">
+                        </div>
+                      </div>
+                      {% endfor %}
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Done</button>
+                      <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ================= LEDGER PASSWORD ================= -->
+<div class="d-flex justify-content-between align-items-center mt-5 mb-2" id="ledger">
+  <h4 class="mb-0">Event Ledger Password</h4>
+</div>
+<p class="text-muted small mb-3">
+  The ledger has its own password on top of each person's login.
+  {% if ledger_settings.get('ledger_password_set_at') %}
+    Last changed {{ ledger_settings.ledger_password_set_at|datetimeformat }} by {{ ledger_settings.ledger_password_set_by }}.
+  {% else %}
+    It hasn't been set here yet, so the ledger stays locked until you set one.
+  {% endif %}
+</p>
+<div class="card shadow-sm mb-5">
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('admin_ledger_password') }}" class="row g-3 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label small mb-1" for="ledger-pw">New ledger password</label>
+        <input id="ledger-pw" name="password" type="password" class="form-control" autocomplete="new-password" minlength="12" required>
+      </div>
+      <div class="col-md-5">
+        <label class="form-label small mb-1" for="ledger-confirm">Confirm</label>
+        <input id="ledger-confirm" name="confirm" type="password" class="form-control" autocomplete="new-password" minlength="12" required>
+      </div>
+      <div class="col-md-2 text-end">
+        <button type="submit" class="btn btn-primary w-100">Save</button>
+      </div>
+      <div class="col-12"><span class="form-text">At least 12 characters. Changing it locks the ledger for anyone who had it open.</span></div>
+    </form>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll(".sheet-form").forEach(function (form) {
+    const sw = form.querySelector(".lock-switch");
+    const btn = form.querySelector(".users-btn");
+    const count = form.querySelector(".users-count");
+    sw.addEventListener("change", function () {
+      btn.disabled = !sw.checked;
+      btn.title = sw.checked ? "" : "Lock the sheet to choose users";
+    });
+    form.querySelectorAll(".user-toggle").forEach(function (t) {
+      t.addEventListener("change", function () {
+        count.textContent = form.querySelectorAll(".user-toggle:checked").length;
+      });
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .ra-wrap { max-width: 1150px; margin: 0 auto; }
+  .ra-table th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: #64748b; font-weight: 700; }
+  .ra-table td { vertical-align: middle; }
+  .ra-row { cursor: pointer; }
+  .ra-row.editing td { background: #eff6ff !important; }
+  .ra-bar { height: 8px; background: #f1f5f9; border-radius: 99px; overflow: hidden; min-width: 120px; }
+  .ra-bar > div { height: 100%; border-radius: 99px; }
+  .ra-legend span { margin-right: 14px; white-space: nowrap; }
+</style>
+
+{% set status_label = {'critical': 'Below reorder point', 'warning': 'Getting low', 'ok': 'OK', 'invalid': 'Needs attention'} %}
+{% set status_badge = {'critical': 'bg-danger', 'warning': 'bg-warning text-dark', 'ok': 'bg-success', 'invalid': 'bg-secondary'} %}
+{% set status_bar = {'critical': '#dc2626', 'warning': '#f59e0b', 'ok': '#16a34a', 'invalid': '#cbd5e1'} %}
+
+<div class="ra-wrap">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="section-title mb-0">Reorder Alerts</h2>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('list_products') }}">View Products</a>
+  </div>
+
+
+  <!-- Add / edit -->
+  <div class="card section-card shadow-sm mb-4" id="alertFormCard">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <span class="fw-semibold" id="formTitle">Add an Alert</span>
+      <button type="button" class="btn btn-sm btn-link d-none" id="cancelEdit">Cancel edit</button>
+    </div>
+    <div class="card-body">
+      <form class="row g-3 align-items-end" method="post" action="{{ url_for('alerts_add') }}" id="alertForm">
+        <div class="col-md-6">
+          <label class="form-label" for="aProduct">Product</label>
+          <select class="form-select" name="product_id" id="aProduct" required>
+            <option value="" selected disabled>Select a product…</option>
+            {% for p in products|sort(attribute='name') %}
+              <option value="{{ p.id }}" data-unit="{{ (p.default_unit or 'gal')|lower }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label" for="aAmount">Reorder when below</label>
+          <input class="form-control" type="number" step="any" min="0.0001" name="amount" id="aAmount" placeholder="e.g. 500" required>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label" for="aUnit">Unit</label>
+          <select class="form-select" name="unit" id="aUnit" required>
+            <option value="gal">GAL</option>
+            <option value="lb">LB</option>
+            <option value="unit">UNIT</option>
+          </select>
+        </div>
+        <div class="col-md-1 d-grid">
+          <button class="btn btn-primary" type="submit" id="aSave">Save</button>
+        </div>
+      </form>
+      <div class="small text-muted mt-2">One alert per product. Saving an alert for a product that already has one updates it.</div>
+    </div>
+  </div>
+
+  <!-- Current alerts -->
+  <div class="card section-card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span class="fw-semibold">Current Alerts</span>
+      <span class="small text-muted ra-legend">
+        <span><span class="badge bg-danger">&nbsp;</span> Below reorder point</span>
+        <span><span class="badge bg-warning">&nbsp;</span> Within 15% of it</span>
+        <span><span class="badge bg-success">&nbsp;</span> OK</span>
+      </span>
+    </div>
+    {% if alerts %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 ra-table">
+        <thead class="table-light">
+          <tr>
+            <th>Product</th>
+            <th class="text-end">On hand</th>
+            <th class="text-end">Reorder at</th>
+            <th class="text-end">Short by</th>
+            <th>Status</th>
+            <th style="width:150px;">Level</th>
+            <th class="text-end" style="width:150px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in alerts %}
+          {% set u = (r.display_unit or r.default_unit)|unit_caps %}
+          <tr class="ra-row" data-pid="{{ r.product_id }}" data-amount="{{ '%g'|format(r.display_threshold) }}" data-unit="{{ r.display_unit }}">
+            <td class="fw-semibold">
+              <a href="{{ url_for('product_detail', product_id=r.product_id) }}" class="text-decoration-none">{{ r.name }}</a>
+              {% if r.problem %}<div class="small text-danger fw-normal">{{ r.problem }}</div>{% endif %}
+            </td>
+            <td class="text-end">{% if r.display_on_hand is not none %}{{ '{:,.2f}'.format(r.display_on_hand) }} {{ u }}{% else %}—{% endif %}</td>
+            <td class="text-end">{% if r.display_threshold %}{{ '{:,.2f}'.format(r.display_threshold) }} {{ u }}{% else %}—{% endif %}</td>
+            <td class="text-end">{% if r.display_deficit %}<span class="text-danger fw-semibold">{{ '{:,.2f}'.format(r.display_deficit) }} {{ u }}</span>{% else %}—{% endif %}</td>
+            <td><span class="badge {{ status_badge[r.status] }}">{{ status_label[r.status] }}</span></td>
+            <td>
+              {% if r.ratio is not none %}
+                {% set pct = [r.ratio * 100 / 1.5, 100]|min %}
+                <div class="ra-bar" title="{{ '%.0f'|format(r.ratio * 100) }}% of the reorder point">
+                  <div style="width: {{ '%.0f'|format(pct) }}%; background: {{ status_bar[r.status] }};"></div>
+                </div>
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              <button type="button" class="btn btn-sm btn-outline-secondary ra-edit">Edit</button>
+              <form method="post" action="{{ url_for('alerts_delete', product_id=r.product_id) }}" class="d-inline"
+                    data-msg="Remove the alert for {{ r.name }}?" onsubmit="return confirm(this.dataset.msg);">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted">No alerts yet. Use the form above to add one.</div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  (function () {
+    const prodSel = document.getElementById("aProduct");
+    const amount = document.getElementById("aAmount");
+    const unitSel = document.getElementById("aUnit");
+    const title = document.getElementById("formTitle");
+    const cancel = document.getElementById("cancelEdit");
+    const save = document.getElementById("aSave");
+
+    // New alerts default to the product's own unit
+    prodSel.addEventListener("change", function () {
+      const u = prodSel.selectedOptions[0]?.dataset.unit;
+      if (u && [...unitSel.options].some(o => o.value === u) && !title.dataset.editing) unitSel.value = u;
+    });
+
+    function startEdit(tr) {
+      document.querySelectorAll(".ra-row.editing").forEach(r => r.classList.remove("editing"));
+      tr.classList.add("editing");
+      prodSel.value = tr.dataset.pid;
+      amount.value = tr.dataset.amount;
+      unitSel.value = tr.dataset.unit || "gal";
+      title.textContent = "Edit Alert: " + prodSel.selectedOptions[0].text;
+      title.dataset.editing = "1";
+      save.textContent = "Update";
+      cancel.classList.remove("d-none");
+      document.getElementById("alertFormCard").scrollIntoView({ behavior: "smooth", block: "start" });
+      amount.focus();
+    }
+
+    cancel.addEventListener("click", function () {
+      document.getElementById("alertForm").reset();
+      document.querySelectorAll(".ra-row.editing").forEach(r => r.classList.remove("editing"));
+      title.textContent = "Add an Alert"; delete title.dataset.editing;
+      save.textContent = "Save"; cancel.classList.add("d-none");
+    });
+
+    // Click a row (or its Edit button) to edit that alert
+    document.querySelectorAll(".ra-row").forEach(function (tr) {
+      tr.addEventListener("click", function (e) {
+        if (e.target.closest("a, form")) return;
+        startEdit(tr);
+      });
+    });
+  })();
+</script>
+{% endblock %}

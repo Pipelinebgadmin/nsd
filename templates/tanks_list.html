@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container,
+  .container-sm,
+  .container-md,
+  .container-lg,
+  .container-xl,
+  .container-xxl,
+  .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+</style>
+
+<h2 class="section-title" style="margin-top: -6px;">
+  Tanks — {{ location.get('name','Location') }}
+</h2>
+
+<div class="card section-card shadow-sm">
+  <div class="card-body">
+
+    <div class="row-form" style="justify-content:space-between; align-items:center;">
+      <div class="text-muted" style="font-size:.9rem;">
+        Capacity is always stored in gallons. Fill is computed from tank ledger.
+      </div>
+      <a class="btn btn-primary btn-sm" href="{{ url_for('add_tank', location_id=location.get('id')) }}">
+        + Add Tank
+      </a>
+    </div>
+
+    {% if not tanks %}
+      <div class="text-muted" style="margin-top:10px;">No tanks yet for this location.</div>
+    {% else %}
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:10px;">
+        {% for t in tanks %}
+          <div style="border:1px solid #e5e7eb; border-radius:12px; padding:12px;">
+            <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+              <div style="font-weight:700;">{{ t.name }}</div>
+              <div class="text-muted" style="font-size:.9rem;">
+                {{ (t.fill_gal|round(2)) }} / {{ (t.capacity_gal|round(2)) }} GAL • {{ (t.pct_full*100)|round(1) }}%
+              </div>
+            </div>
+
+            <div class="text-muted" style="font-size:.9rem; margin-top:4px;">
+              Status: {{ t.status }}
+              {% if t.assigned_product_name %}
+                • Holding: {{ t.assigned_product_name }}
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="row-form" style="justify-content:flex-end; gap:8px; margin-top:12px;">
+      <a href="{{ url_for('locations_page') }}" class="btn btn-outline-secondary btn-sm">Back</a>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}
