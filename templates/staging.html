@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Kill all container width caps — force full-width dashboard */
+  .container, .container-sm, .container-md, .container-lg,
+  .container-xl, .container-xxl, .container-fluid {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+  }
+
+  .stg-table { margin: 0; }
+  .stg-table > thead th {
+    font-size: .8rem; color: #64748b; font-weight: 600;
+    background: #f8fafc; border-bottom: 1px solid #e5e7eb;
+  }
+
+  /* Location rows: the whole row is the toggle */
+  .loc-row { cursor: pointer; }
+  .loc-row:hover > td { background: #f8fafc; }
+  .loc-row:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+  .loc-row > td { padding-top: 14px; padding-bottom: 14px; }
+  .loc-row.is-open > td { background: #f1f5f9; border-bottom-color: transparent; }
+  .loc-row.is-empty { color: #94a3b8; }
+
+  .loc-caret {
+    display: inline-block; width: 1rem; color: #64748b;
+    transition: transform .15s ease;
+  }
+  .loc-row.is-open .loc-caret { transform: rotate(90deg); }
+  .loc-name { font-weight: 600; font-size: 1rem; }
+
+  .loc-count {
+    display: inline-block; min-width: 1.75rem; padding: 2px 8px;
+    border-radius: 999px; font-size: .8rem; font-weight: 600; text-align: center;
+    background: #fef3c7; color: #92400e;
+  }
+  .loc-row.is-empty .loc-count { background: #f1f5f9; color: #94a3b8; }
+
+  /* The opened area under a location */
+  .loc-detail > td { padding: 0 !important; background: #f1f5f9; }
+  .loc-detail-inner { padding: 4px 16px 16px 40px; }
+  .orders { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+  .orders table { margin: 0; }
+  .orders th {
+    font-size: .75rem; color: #64748b; font-weight: 600; white-space: nowrap;
+    background: #fff; border-bottom: 1px solid #e5e7eb;
+  }
+  .orders td { vertical-align: top; font-size: .9rem; }
+  .orders tr:last-child td { border-bottom: 0; }
+  .qty-main { font-weight: 600; white-space: nowrap; }
+  .qty-sub { color: #64748b; font-size: .8rem; white-space: nowrap; }
+  .pkg-line { white-space: nowrap; }
+  .pkg-bulk { color: #64748b; }
+  .muted-sm { color: #64748b; font-size: .8rem; }
+  .notes-cell { min-width: 180px; max-width: 360px; white-space: pre-wrap; }
+  .actions-cell { white-space: nowrap; text-align: right; }
+  .actions-cell form { display: inline; }
+  .days { font-weight: 600; white-space: nowrap; }
+  .days.warn { color: #b45309; }
+  .days.late { color: #b91c1c; }
+  .lift-input { width: 150px; }
+  .lift-input.overdue { border-color: #dc2626; color: #b91c1c; }
+  .lift-status { font-size: .75rem; min-height: 1em; margin-top: 2px; }
+  .lift-status.ok { color: #15803d; }
+  .lift-status.err { color: #b91c1c; }
+  .lift-status.late { color: #b91c1c; }
+  .money { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .empty-note { padding: 14px 16px; color: #64748b; font-size: .9rem; }
+
+  @media (prefers-reduced-motion: reduce) { .loc-caret { transition: none; } }
+</style>
+
+{% if not embed %}
+<div style="display:flex; align-items:center; justify-content:space-between; margin-top:-6px; gap:12px; flex-wrap:wrap;">
+  <h2 class="section-title" style="margin:0;">Staging</h2>
+  {% if can('adjust_inventory') %}
+  <a href="{{ url_for('inventory_adjust_page') }}" class="btn btn-outline-secondary btn-sm">Stage an order on Adjust Inventory</a>
+  {% endif %}
+</div>
+<p class="text-muted" style="margin:6px 0 12px;">
+  Sold product that hasn't left the yard yet. Click a location to see its orders.
+</p>
+{% endif %}
+
+<div class="card section-card shadow-sm">
+  <div class="table-responsive">
+    <table class="table stg-table align-middle">
+      <thead>
+        <tr>
+          <th>Location</th>
+          <th class="text-end" style="width:140px;">Orders waiting</th>
+          <th class="text-end" style="width:160px;">Total GAL</th>
+          {% if can('costs') %}<th class="text-end" style="width:160px;">FIFO value</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for sec in sections %}
+          {% set has_rows = sec.rows|length > 0 %}
+          <tr class="loc-row {{ '' if has_rows else 'is-empty' }}"
+              data-target="detail-{{ sec.id }}" data-loc-id="{{ sec.id }}"
+              tabindex="0" role="button" aria-expanded="false" aria-controls="detail-{{ sec.id }}">
+            <td>
+              <span class="loc-caret" aria-hidden="true">▸</span>
+              <span class="loc-name">{{ sec.name }}</span>
+            </td>
+            <td class="text-end"><span class="loc-count">{{ sec.rows|length }}</span></td>
+            <td class="text-end">{{ '%.2f'|format(sec.total_gal) if has_rows else '—' }}</td>
+            {% if can('costs') %}<td class="text-end money">{{ '${:,.2f}'.format(sec.total_value) if has_rows else '—' }}</td>{% endif %}
+          </tr>
+
+          <tr class="loc-detail" id="detail-{{ sec.id }}" hidden>
+            <td colspan="{{ 4 if can('costs') else 3 }}">
+              <div class="loc-detail-inner">
+                <div class="orders">
+                  {% if has_rows %}
+                  <div class="table-responsive">
+                    <table class="table table-sm">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Product</th>
+                          <th>Qty (GAL / LB)</th>
+                          <th>Packages</th>
+                          {% if can('costs') %}<th class="text-end">FIFO value</th>{% endif %}
+                          <th>Expected lift</th>
+                          <th>Days in staging</th>
+                          <th>Notes</th>
+                          <th class="text-end">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for r in sec.rows %}
+                          {% if r.gal is not none %}
+                            {% set qty_label = '%.2f GAL'|format(r.gal) ~ (' / %.2f LB'|format(r.lb) if r.lb is not none else '') %}
+                          {% elif r.lb is not none %}
+                            {% set qty_label = '%.2f LB'|format(r.lb) %}
+                          {% else %}
+                            {% set qty_label = '%g UNIT'|format(r.units or 0) %}
+                          {% endif %}
+                          {% set pkg_label = r.packages|join(', ') if r.packages else 'bulk (unpackaged)' %}
+                        <tr>
+                          <td style="white-space:nowrap;">
+                            {{ r.staged_at|datetimeformat('%b %d, %Y') }}
+                            <div class="muted-sm">{{ r.staged_at|datetimeformat('%I:%M %p') }}</div>
+                          </td>
+                          <td style="font-weight:600;">{{ r.product_name }}</td>
+                          <td>
+                            {% if r.gal is not none or r.lb is not none %}
+                              <div class="qty-main">{{ '%.2f'|format(r.gal) if r.gal is not none else '—' }} GAL</div>
+                              <div class="qty-sub">{{ '%.2f'|format(r.lb) if r.lb is not none else '—' }} LB</div>
+                            {% else %}
+                              <div class="qty-main">{{ '%g'|format(r.units or 0) }} UNIT</div>
+                            {% endif %}
+                          </td>
+                          <td>
+                            {% if r.packages %}
+                              {% for p in r.packages %}<div class="pkg-line">{{ p }}</div>{% endfor %}
+                            {% else %}
+                              <span class="pkg-bulk">Bulk (unpackaged)</span>
+                            {% endif %}
+                          </td>
+                          {% if can('costs') %}
+                          <td class="text-end money">{{ '${:,.2f}'.format(r.value) }}</td>
+                          {% endif %}
+                          <td>
+                            <input type="date" class="form-control form-control-sm lift-input {{ 'overdue' if r.lift_overdue else '' }}"
+                                   value="{{ r.lift_date }}" aria-label="Expected lift date for {{ r.product_name }}"
+                                   data-url="{{ url_for('staging_lift_date', record_id=r.id) }}">
+                            <div class="lift-status {{ 'late' if r.lift_overdue else '' }}">{{ 'Past due' if r.lift_overdue else '' }}</div>
+                          </td>
+                          <td>
+                            {% if r.days is none %}—
+                            {% else %}
+                              <span class="days {{ 'late' if r.lift_overdue else ('warn' if r.days >= 7 else '') }}">
+                                {{ 'Today' if r.days == 0 else (r.days ~ (' day' if r.days == 1 else ' days')) }}
+                              </span>
+                            {% endif %}
+                          </td>
+                          <td class="notes-cell">
+                            {% if r.customer %}<div style="font-weight:600;">{{ r.customer }}</div>{% endif %}
+                            {{- r.notes or ('' if r.customer else '—') -}}
+                          </td>
+                          <td class="actions-cell">
+                            <form method="POST" action="{{ url_for('staging_picked_up', record_id=r.id) }}" class="js-confirm"
+                                  data-title="Mark as picked up?"
+                                  data-body="{{ qty_label }} of {{ r.product_name }} ({{ pkg_label }}) will be removed from staging at {{ sec.name }}. This can't be undone."
+                                  data-ok-class="btn-success">
+                              <input type="hidden" name="open" value="{{ sec.id }}">
+                              <input type="hidden" name="only_location" value="{{ only_location }}">
+                              <input type="hidden" name="embed" value="{{ '1' if embed else '' }}">
+                              <button type="submit" class="btn btn-success btn-sm">Picked up</button>
+                            </form>
+                            <form method="POST" action="{{ url_for('staging_cancel', record_id=r.id) }}" class="js-confirm"
+                                  data-title="Cancel this order?"
+                                  data-body="{{ qty_label }} of {{ r.product_name }} ({{ pkg_label }}) will go back into inventory at {{ sec.name if sec.id != 'none' else 'its original spot' }}. This can't be undone."
+                                  data-ok-class="btn-danger">
+                              <input type="hidden" name="open" value="{{ sec.id }}">
+                              <input type="hidden" name="only_location" value="{{ only_location }}">
+                              <input type="hidden" name="embed" value="{{ '1' if embed else '' }}">
+                              <button type="submit" class="btn btn-outline-danger btn-sm">Canceled</button>
+                            </form>
+                          </td>
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  {% else %}
+                    <div class="empty-note">Nothing in staging here. Orders show up when you Remove with Staging set to Yes.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="{{ 4 if can('costs') else 3 }}" class="text-muted" style="padding:16px;">
+            {{ "You don't have access to this location's staging." if only_location else "No locations yet. Add one on the Locations page." }}
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Confirmation popup (shared by every Picked up / Canceled button) -->
+<div class="modal fade" id="stgConfirm" tabindex="-1" aria-labelledby="stgConfirmTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="stgConfirmTitle">Are you sure?</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="stgConfirmBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn" id="stgConfirmOk">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  // ---- Open / close location rows ----
+  function setOpen(row, open) {
+    const detail = document.getElementById(row.dataset.target);
+    if (!detail) return;
+    detail.hidden = !open;
+    row.classList.toggle('is-open', open);
+    row.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  document.querySelectorAll('.loc-row').forEach(function (row) {
+    row.addEventListener('click', function () { setOpen(row, row.getAttribute('aria-expanded') !== 'true'); });
+    row.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
+    });
+  });
+
+  // Re-open the location the user was working in after an action
+  const openId = {{ open_id|tojson }};
+  if (openId) {
+    const row = document.querySelector('.loc-row[data-loc-id="' + CSS.escape(openId) + '"]');
+    if (row) setOpen(row, true);
+  }
+
+  // ---- Expected lift date: saves as soon as a date is picked (or cleared) ----
+  document.querySelectorAll('.lift-input').forEach(function (input) {
+    const status = input.parentElement.querySelector('.lift-status');
+    let last = input.value;
+    input.addEventListener('change', async function () {
+      if (input.value === last) return;
+      status.className = 'lift-status'; status.textContent = 'Saving…';
+      try {
+        const res = await fetch(input.dataset.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lift_date: input.value })
+        });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not save the date. Try again.');
+        last = input.value;
+        input.classList.toggle('overdue', !!data.overdue);
+        const days = input.closest('tr').querySelector('.days');
+        if (days) days.classList.toggle('late', !!data.overdue);
+        status.className = 'lift-status ' + (data.overdue ? 'late' : 'ok');
+        status.textContent = data.overdue ? 'Saved · past due' : (input.value ? 'Saved' : 'Cleared');
+      } catch (err) {
+        input.value = last;
+        status.className = 'lift-status err';
+        status.textContent = err.message;
+      }
+    });
+  });
+
+  // ---- Confirm popup: OK submits, Cancel does nothing ----
+  const modalEl = document.getElementById('stgConfirm');
+  const okBtn = document.getElementById('stgConfirmOk');
+  const modal = (window.bootstrap && bootstrap.Modal) ? new bootstrap.Modal(modalEl) : null;
+  let pendingForm = null;
+
+  document.querySelectorAll('form.js-confirm').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      if (form.dataset.confirmed === '1') return;   // already OK'd
+      e.preventDefault();
+      if (!modal) {                                  // fallback if Bootstrap didn't load
+        if (window.confirm(form.dataset.title + '\n\n' + form.dataset.body)) { form.dataset.confirmed = '1'; form.submit(); }
+        return;
+      }
+      pendingForm = form;
+      document.getElementById('stgConfirmTitle').textContent = form.dataset.title;
+      document.getElementById('stgConfirmBody').textContent = form.dataset.body;
+      okBtn.textContent = form.dataset.ok || 'OK';
+      okBtn.className = 'btn ' + (form.dataset.okClass || 'btn-primary');
+      modal.show();
+    });
+  });
+
+  okBtn.addEventListener('click', function () {
+    if (!pendingForm) return;
+    okBtn.disabled = true;                          // no double submits
+    pendingForm.dataset.confirmed = '1';
+    pendingForm.requestSubmit ? pendingForm.requestSubmit() : pendingForm.submit();
+  });
+  modalEl.addEventListener('hidden.bs.modal', function () { pendingForm = null; okBtn.disabled = false; });
+});
+</script>
+
+{% endblock %}

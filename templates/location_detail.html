@@ -273,20 +273,32 @@
 
   <div class="card section-card shadow-sm">
     <div class="card-body" style="padding:0;">
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <div style="display:flex; gap:8px; margin-bottom:10px;" role="tablist" aria-label="Location tools">
         <button
           type="button"
-          class="btn btn-primary btn-sm"
+          class="btn btn-primary btn-sm tool-btn"
+          data-tool="adjust"
           onclick="setTool('adjust')">
           Adjust Inventory
         </button>
 
         <button
           type="button"
-          class="btn btn-outline-secondary btn-sm"
+          class="btn btn-outline-secondary btn-sm tool-btn"
+          data-tool="blend"
           onclick="setTool('blend')">
           Blend Builder
         </button>
+
+        {% if can('staging') %}
+        <button
+          type="button"
+          class="btn btn-outline-secondary btn-sm tool-btn"
+          data-tool="staging"
+          onclick="setTool('staging')">
+          Staging
+        </button>
+        {% endif %}
 
       </div>
       <iframe
@@ -342,11 +354,22 @@ function setTool(tool){
 
       adjust: "{{ url_for('inventory_adjust_page') }}?location_id={{ location_id }}&embed=1",
 
-      blend: "{{ url_for('blend_new_page') }}?location_id={{ location_id }}&embed=1"
+      blend: "{{ url_for('blend_new_page') }}?location_id={{ location_id }}&embed=1",
+
+      staging: "{{ url_for('staging_page') }}?location_id={{ location_id }}&embed=1"
 
   }
 
-  frame.src = urls[tool] || urls.adjust;
+  if (!urls[tool]) tool = "adjust";
+  frame.src = urls[tool];
+
+  // Highlight the tab that's showing
+  document.querySelectorAll(".tool-btn").forEach(b => {
+    const on = b.dataset.tool === tool;
+    b.classList.toggle("btn-primary", on);
+    b.classList.toggle("btn-outline-secondary", !on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
 }
 </script>
 

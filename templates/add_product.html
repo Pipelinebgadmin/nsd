@@ -164,21 +164,7 @@
       </div>
 
       <!-- Row 6: Location, Notes -->
-      <div class="row-form">
-        <label for="location_id">Location</label>
-        {% set loc_val = form.get('location_id','') %}
-        <select id="location_id" name="location_id">
-          <option value="" {% if not loc_val %}selected{% endif %}>Select a location</option>
 
-          {% for loc in locations or [] %}
-            {% set loc_id = (loc.id if loc.id is defined else loc.get('id')) %}
-            {% set loc_name = (loc.name if loc.name is defined else loc.get('name')) %}
-            <option value="{{ loc_id }}" {% if loc_val|string == loc_id|string %}selected{% endif %}>
-              {{ loc_name }}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
 
       <div class="row-form">
         <label for="notes">Notes</label>

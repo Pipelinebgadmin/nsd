@@ -365,6 +365,10 @@ ENDPOINT_FEATURES = {
     "staging_create_route": {"staging", "adjust_inventory"},
     "staging_release_flow": {"staging", "adjust_inventory"},
     "staging_void_route": {"staging", "adjust_inventory"},
+    "staging_page": {"staging"},
+    "staging_picked_up": {"staging"},
+    "staging_cancel": {"staging"},
+    "staging_lift_date": {"staging"},
     "blend_new_page": {"blending", "blend_builder"},
     "blend_builder_info": {"blend_builder"},
     "blend_build": {"blend_builder"},
@@ -2297,13 +2301,13 @@ def fifo_issue(prod: dict, qty_default: float) -> dict:
     }
 
 
-def fifo_return(prod: dict, pulls: list):
+def fifo_return(prod: dict, pulls: list, location: str | None = None):
     _ensure_layers(prod)
     if not pulls:
         return
 
     unit = normalize_unit(prod.get("default_unit"))
-    base_loc = (prod.get("location") or "UNASSIGNED").strip() or "UNASSIGNED"
+    base_loc = (location or prod.get("location") or "UNASSIGNED").strip() or "UNASSIGNED"
 
     for p in pulls:
         try:
@@ -3856,7 +3860,8 @@ class StagingError(Exception):
     pass
 
 
-def stage_create(products, product_id, qty, unit, customer=None, reason=None, scheduled_date=None, notes=None, package_breakdown=None):
+def stage_create(products, product_id, qty, unit, customer=None, reason=None, scheduled_date=None, notes=None, package_breakdown=None,
+                 location_id=None, location_name=None, tanks=None):
     qty = float(qty)
     if qty <= 0:
         raise StagingError("Quantity must be > 0.")
@@ -3879,8 +3884,15 @@ def stage_create(products, product_id, qty, unit, customer=None, reason=None, sc
             f"Not enough inventory. Need {qty_default:.4f} {prod.get('default_unit')}, on hand {on_hand:.4f}."
         )
 
-    # FIFO issue at staging time (reserve inventory)
-    issue_info = fifo_issue(prod, qty_default)
+    # FIFO issue at staging time (reserve inventory). When we know the location,
+    # pull only from that location's stock, same as a regular Remove.
+    try:
+        if location_name:
+            issue_info = fifo_issue_from_location(prod, qty_default, location_name)
+        else:
+            issue_info = fifo_issue(prod, qty_default)
+    except ValueError as e:
+        raise StagingError(str(e))
 
     record = {
         "id": str(uuid.uuid4()),
@@ -3905,6 +3917,10 @@ def stage_create(products, product_id, qty, unit, customer=None, reason=None, sc
         "fifo_pulls": issue_info.get("pulls", []),
         "fifo_issued_value": float(issue_info.get("issued_value") or 0.0),
         "packages": package_breakdown or None,
+        "tanks": tanks or None,              # [{tank_id, tank_name, gal}] pulled out of tanks
+        "location_id": str(location_id) if location_id else None,
+        "location_name": location_name or None,
+        "staged_by": (current_user() or {}).get("username"),
     }
 
     records = load_staging()
@@ -3924,8 +3940,17 @@ def stage_release(record_id):
                 raise StagingError("Only staged records can be released.")
             r["status"] = "released"
             r["released_at"] = central_time_now_str()
+            r["released_by"] = (current_user() or {}).get("username")
 
             save_staging(records)
+            append_ledger_entry("staging_picked_up", {
+                "staging_id": r.get("id"),
+                "product_id": r.get("product_id"),
+                "product_name": r.get("product_name"),
+                "qty": r.get("qty_default"),
+                "location": r.get("location_name"),
+                "by": r.get("released_by"),
+            })
             return r
     raise StagingError("Staging record not found.")
 
@@ -3943,17 +3968,68 @@ def stage_void(record_id, return_to_inventory=False):
             r["voided_at"] = central_time_now_str()
 
 
+            r["voided_by"] = (current_user() or {}).get("username")
+            warnings = []
+
             if return_to_inventory:
                 prod = _get_product(products, r.get("product_id"))
                 if not prod:
                     raise StagingError("Original product no longer exists; cannot return to inventory.")
 
+                # 1) bulk quantity goes back at the location it came from, at its original cost
                 migrate_products_to_layers(products)
-                fifo_return(prod, r.get("fifo_pulls") or [])
+                fifo_return(prod, r.get("fifo_pulls") or [], location=r.get("location_name"))
+
+                # 2) packages that were sold come back as packages
+                pkg_rows = r.get("packages") or []
+                if pkg_rows:
+                    pki_records = load_package_inventory()
+                    for row in pkg_rows:
+                        pqty = float(row.get("qty") or 0.0)
+                        if pqty <= 0:
+                            continue
+                        vol_per = float(row.get("volume_per") or 0.0)
+                        pki_records.append({
+                            "id":            generate_next_pki_id(pki_records),
+                            "product_id":    str(r.get("product_id")),
+                            "package_id":    row.get("package_id"),
+                            "package_name":  row.get("package_name"),
+                            "quantity":      pqty,
+                            "volume_per":    vol_per,
+                            "unit":          row.get("unit") or "gal",
+                            "total_volume":  pqty * vol_per,
+                            "location_id":   r.get("location_id"),
+                            "location_name": r.get("location_name"),
+                            "received_at":   now_central_iso(),
+                            "removed_at":    None,
+                            "type":          "staged_cancel",
+                            "notes":         "Staging order canceled",
+                        })
+                    save_package_inventory(pki_records)
+
+                # 3) gallons that came out of tanks go back into those tanks if they still fit
+                for t in (r.get("tanks") or []):
+                    try:
+                        apply_tank_receive(t.get("tank_id"), prod, float(t.get("gal") or 0), "gal",
+                                           source="staging_cancel", notes="Staging order canceled")
+                    except Exception as e:
+                        warnings.append(f"{t.get('tank_name') or 'Tank'}: {e} The gallons are back in "
+                                        f"inventory at {r.get('location_name') or 'the location'}, just not in the tank.")
+
                 r["returned_to_inventory"] = True
                 save_products(products)
 
+            r["cancel_warnings"] = warnings or None
             save_staging(records)
+            append_ledger_entry("staging_canceled", {
+                "staging_id": r.get("id"),
+                "product_id": r.get("product_id"),
+                "product_name": r.get("product_name"),
+                "qty": r.get("qty_default"),
+                "location": r.get("location_name"),
+                "returned_to_inventory": bool(return_to_inventory),
+                "by": r.get("voided_by"),
+            })
             return r
 
     raise StagingError("Staging record not found.")
@@ -4232,10 +4308,7 @@ def add_product():
         if phase not in PHASES:
             errors.append("Phase must be 'liquid' or 'solid'.")
 
-        # ✅ validate location selection (only if you want it required)
-        # If you want it optional, remove this block.
-        if not location_id:
-            errors.append("Location is required.")
+        # Location is optional here; stock gets its location on Receive.
 
         try:
             unit_cost = float(unit_cost_raw)
@@ -5546,9 +5619,13 @@ def inventory_adjust_page():
                         products, product_id, qty_default, normalize_unit(prod.get("default_unit")),
                         customer, reason, scheduled_date, notes,
                         package_breakdown=package_rows_parsed,
+                        location_id=location_id, location_name=effective_location,
+                        tanks=[{"tank_id": trow["id"], "tank_name": trow.get("name"), "gal": g}
+                               for trow, g in tank_moves] or None,
                     )
                 else:
-                    stage_create(products, product_id, qty, unit, customer, reason, scheduled_date, notes)
+                    stage_create(products, product_id, qty, unit, customer, reason, scheduled_date, notes,
+                                 location_id=location_id, location_name=effective_location)
             except StagingError as e:
                 return render_template(
                     "inventory_adjust.html",
@@ -5857,6 +5934,174 @@ def staging_void_route(record_id):
     return {"ok": True, "record": rec}, 200
 
 
+def _staging_row(rec):
+    """Shape one staged record for the Staging page."""
+    q = _safe_float(rec.get("qty_default"), 0.0)
+    u = normalize_unit(rec.get("default_unit") or "gal")
+    w = _safe_float(rec.get("weight_snapshot"), 0.0)
+    gal = lb = units = None
+    if u == "gal":
+        gal, lb = q, (q * w if w > 0 else None)
+    elif u == "lb":
+        lb, gal = q, (q / w if w > 0 else None)
+    else:
+        units = q
+
+    pkgs = [f"{_safe_float(p.get('qty'), 0):g} × {p.get('package_name') or 'Package'}"
+            for p in (rec.get("packages") or [])]
+    pkgs += [f"{_safe_float(t.get('gal'), 0):g} GAL from {t.get('tank_name') or 'tank'}"
+             for t in (rec.get("tanks") or [])]
+
+    # Days in staging, counted in Central time (0 = staged today)
+    today = datetime.now(tz=CENTRAL_TZ).date()
+    try:
+        staged_day = datetime.fromisoformat(str(rec.get("staged_at") or "").replace("Z", "")).date()
+        days = max(0, (today - staged_day).days)
+    except ValueError:
+        days = None
+
+    lift = rec.get("expected_lift_date") or rec.get("scheduled_date") or ""
+    try:
+        lift_day = datetime.strptime(lift, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        lift, lift_day = "", None
+
+    return {
+        "id": rec.get("id"),
+        "staged_at": rec.get("staged_at"),
+        "days": days,
+        "lift_date": lift,
+        "lift_overdue": bool(lift_day and lift_day < today),
+        "value": _safe_float(rec.get("fifo_issued_value", rec.get("value_snapshot")), 0.0),
+        "product_name": rec.get("product_name") or "—",
+        "gal": gal, "lb": lb, "units": units,
+        "packages": pkgs,
+        "customer": rec.get("customer"),
+        "notes": rec.get("notes"),
+        "scheduled_date": rec.get("scheduled_date"),
+    }
+
+
+def _staging_record_location_ok(rec) -> bool:
+    user = current_user()
+    if rec.get("location_id"):
+        return user_can_use_location(user, loc_id=rec.get("location_id"))
+    if rec.get("location_name"):
+        return user_can_use_location(user, loc_name=rec.get("location_name"))
+    return allowed_location_ids(user) is None   # old records with no location: unrestricted users only
+
+
+@app.route("/staging")
+def staging_page():
+    locations = load_locations_for_user()
+    by_id = {str(l.get("id")): l for l in locations}
+    by_name = {(l.get("name") or "").strip().lower(): str(l.get("id")) for l in locations}
+
+    groups = {str(l.get("id")): [] for l in locations}
+    unassigned = []
+    for rec in load_staging():
+        if (rec.get("status") or "").lower() != "staged":
+            continue
+        lid = str(rec.get("location_id") or "") or by_name.get((rec.get("location_name") or "").strip().lower(), "")
+        if lid in groups:
+            groups[lid].append(_staging_row(rec))
+        elif not rec.get("location_id") and not rec.get("location_name") and allowed_location_ids(current_user()) is None:
+            unassigned.append(_staging_row(rec))
+
+    sections = []
+    for lid, rows in groups.items():
+        rows.sort(key=lambda x: x.get("staged_at") or "")
+        sections.append({
+            "id": lid,
+            "name": by_id[lid].get("name") or lid,
+            "rows": rows,
+            "total_gal": round(sum(r["gal"] or 0 for r in rows), 2),
+            "total_value": round(sum(r["value"] for r in rows), 2),
+        })
+    sections.sort(key=lambda x: (len(x["rows"]) == 0, (x["name"] or "").lower()))
+    # One-location view (the Staging tab on a location's page)
+    only = (request.args.get("location_id") or "").strip()
+    if only:
+        sections = [sec for sec in sections if sec["id"] == only]
+        unassigned = []
+
+    if unassigned:
+        unassigned.sort(key=lambda x: x.get("staged_at") or "")
+        sections.append({"id": "none", "name": "No location recorded", "rows": unassigned,
+                         "total_gal": round(sum(r["gal"] or 0 for r in unassigned), 2),
+                         "total_value": round(sum(r["value"] for r in unassigned), 2)})
+
+    return render_template("staging.html", app_title=APP_TITLE, sections=sections,
+                           open_id=only or request.args.get("open", ""), only_location=only,
+                           embed=request.args.get("embed") == "1")
+
+
+def _staging_action(record_id, action):
+    rec = next((r for r in load_staging() if r.get("id") == record_id), None)
+    back = request.form.get("open") or ""
+    only = (request.form.get("only_location") or "").strip()
+    embed = "1" if request.form.get("embed") == "1" else None
+
+    def back_to_staging():
+        # Return to the same view the button was pressed in (full list, or one location's tab)
+        return redirect(url_for("staging_page", open=back or None, location_id=only or None, embed=embed))
+
+    if not rec:
+        flash("That staging order wasn't found. It may have already been handled.", "danger")
+        return back_to_staging()
+    if not _staging_record_location_ok(rec):
+        return render_template("no_access.html", message="You aren't assigned to that location."), 403
+    try:
+        if action == "picked_up":
+            stage_release(record_id)
+            flash(f"{rec.get('product_name')} marked as picked up.", "success")
+        else:
+            done = stage_void(record_id, return_to_inventory=True)
+            flash(f"Order canceled. {rec.get('product_name')} is back in inventory"
+                  f"{' at ' + rec['location_name'] if rec.get('location_name') else ''}.", "success")
+            for w in (done.get("cancel_warnings") or []):
+                flash(w, "warning")
+    except StagingError as e:
+        flash(str(e), "danger")
+    return back_to_staging()
+
+
+@app.route("/staging/<record_id>/lift-date", methods=["POST"])
+def staging_lift_date(record_id):
+    """Save (or clear) the expected lift date on a staged order. Called by the page as you pick a date."""
+    data = request.get_json(silent=True) if request.is_json else request.form
+    raw = ((data or {}).get("lift_date") or "").strip()
+    if raw:
+        try:
+            datetime.strptime(raw, "%Y-%m-%d")
+        except ValueError:
+            return {"ok": False, "error": "Pick a valid date."}, 400
+
+    records = load_staging()
+    rec = next((r for r in records if r.get("id") == record_id), None)
+    if not rec or (rec.get("status") or "").lower() != "staged":
+        return {"ok": False, "error": "That order is no longer in staging. Refresh the page."}, 404
+    if not _staging_record_location_ok(rec):
+        return {"ok": False, "error": "You aren't assigned to that location."}, 403
+
+    rec["expected_lift_date"] = raw or None
+    rec["scheduled_date"] = raw or None      # keep the older field in sync
+    save_staging(records)
+    today = datetime.now(tz=CENTRAL_TZ).date()
+    overdue = bool(raw) and datetime.strptime(raw, "%Y-%m-%d").date() < today
+    return {"ok": True, "lift_date": raw, "overdue": overdue}, 200
+
+
+@app.route("/staging/<record_id>/picked-up", methods=["POST"])
+def staging_picked_up(record_id):
+    return _staging_action(record_id, "picked_up")
+
+
+@app.route("/staging/<record_id>/cancel", methods=["POST"])
+def staging_cancel(record_id):
+    return _staging_action(record_id, "cancel")
+
+
 # -------------------------
 # Blend Builder routes (JSON first)
 # -------------------------
@@ -5940,19 +6185,25 @@ def blend_build():
     # default: EXECUTE (consume inventory + receive finished blend)
     # You can turn it off by sending {"execute": false} if you want a "quote-only" mode later.
     execute_flag = True
-    location = "Production"
 
     if request.is_json:
         payload = request.get_json(silent=True) or {}
         execute_flag = bool(payload.get("execute", True))
-        location = (payload.get("location") or "Production").strip() or "Production"
+        location_id = str(payload.get("location_id") or "").strip()
     else:
         execute_flag = (request.form.get("execute") or "true").lower() in ("1","true","yes","on")
-        location = (request.form.get("location") or "Production").strip() or "Production"
+        location_id = (request.form.get("location_id") or "").strip()
+
+    # The finished blend is received into the location picked on the page.
+    loc = get_location_by_id(load_locations_for_user(), location_id) if location_id else None
+    if not loc:
+        return {"ok": False, "errors": ["Please select a location."]}, 400
+    location = (loc.get("name") or "").strip() or str(loc.get("id"))
 
     try:
         if execute_flag:
-            result = execute_builder_blend(products, name, target_qty, target_unit, mode, components, location=location)
+            result = execute_builder_blend(products, name, target_qty, target_unit, mode, components,
+                                           location=location, location_id=location_id)
             new_id = result["blend_product"]["id"]
         else:
             result = build_blend(products, name, target_qty, target_unit, mode, components)
@@ -5963,9 +6214,6 @@ def blend_build():
         return {"ok": False, "errors": [f"Blend failed: {e}"]}, 400
 
     save_products(products)
-
-    save_products(products)
-    new_id = result["new_product"]["id"]
 
     if (request.args.get("redirect") == "1") and not request.is_json:
         return redirect(url_for("product_detail", product_id=new_id))

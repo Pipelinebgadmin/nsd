@@ -130,6 +130,14 @@
   }
   .af-radio-option input { margin: 0; }
 
+  /* Stacked variant: one option per line, lined up under the label */
+  .af-radio-group.af-radio-stack {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .af-radio-hint { color: #6b7280; font-size: .825rem; }
+
   .af-stage-box {
     border: 1px solid #e5e7eb;
     border-radius: 10px;
@@ -422,10 +430,10 @@
           </select>
         </div>
 
-        <div class="af-radio-group">
+        <div class="af-radio-group af-radio-stack">
           <span class="af-radio-label">Remove by:</span>
-          <label class="af-radio-option"><input type="radio" name="remove_mode_radio" value="bulk" checked onchange="updateRemoveMode()"> Bulk quantity (gal/lb/unit)</label>
-          <label class="af-radio-option"><input type="radio" name="remove_mode_radio" value="package" onchange="updateRemoveMode()"> Package type or tank (full containers, or gallons out of a tank)</label>
+          <label class="af-radio-option"><input type="radio" name="remove_mode_radio" value="bulk" checked onchange="updateRemoveMode()"> Remove by bulk (unpackaged) <span class="af-radio-hint">— gal / lb / unit</span></label>
+          <label class="af-radio-option"><input type="radio" name="remove_mode_radio" value="package" onchange="updateRemoveMode()"> Remove from package <span class="af-radio-hint">— full containers, or gallons out of a tank</span></label>
         </div>
 
         <!-- BULK FIELDS -->

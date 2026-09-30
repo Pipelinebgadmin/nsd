@@ -155,6 +155,18 @@
       {% set wf.shown = true %}
       {% endif %}
 
+      {% if can('staging') %}
+      {% if wf.shown %}<div class="workflow-arrow">→</div>{% endif %}
+      <a href="{{ url_for('staging_page') }}" class="card-link" data-win data-win-title="Staging">
+        <div class="workflow-card">
+          <img src="{{ url_for('static', filename='images/staging.svg') }}" alt="">
+          <div class="card-title">Staging</div>
+          <div class="card-subtext">Sold, waiting for pickup</div>
+        </div>
+      </a>
+      {% set wf.shown = true %}
+      {% endif %}
+
     </div>
 
   </div>

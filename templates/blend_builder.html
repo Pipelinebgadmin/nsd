@@ -105,12 +105,21 @@
 
       <div class="card-body">
         <form id="blendForm" class="row g-3">
-          <div class="col-12 col-lg-6">
+          <div class="col-12 col-lg-4">
             <label class="form-label">Blend name</label>
             <input class="form-control" id="blendName" placeholder="e.g., Shop Solvent A" />
           </div>
 
-          <div class="col-12 col-lg-6">
+          <div class="col-12 col-lg-4">
+            <label class="form-label" for="buildLocation">Location <span class="text-danger">*</span></label>
+            <select id="buildLocation" class="form-select" required>
+              <option value="">Where is it being made?</option>
+              {% for loc in locations %}<option value="{{ loc.id }}">{{ loc.name }}</option>{% endfor %}
+            </select>
+            <div class="k mt-1">The finished blend is received here.</div>
+          </div>
+
+          <div class="col-12 col-lg-4">
             <label class="form-label">Target</label>
             <div class="d-flex gap-2">
               <input class="form-control w-qty" id="targetQty" type="number" step="any" min="0" placeholder="e.g., 120" />
@@ -520,9 +529,11 @@
       const name = document.getElementById('blendName').value.trim();
       const targetQty = parseFloat(document.getElementById('targetQty').value || '0');
       const targetUnit = document.getElementById('targetUnit').value;
+      const locationId = document.getElementById('buildLocation').value;
 
       const errors = [];
       if (!name) errors.push('Blend name is required.');
+      if (!locationId) errors.push('Please select a location.');
       if (!(targetQty > 0)) errors.push('Target quantity must be > 0.');
 
       const comps = [];
@@ -555,7 +566,7 @@
         mode,
         components: comps,
         execute: true,
-        location: 'Production'
+        location_id: locationId
       };
 
 
@@ -572,7 +583,7 @@
       }
 
       // Success — show summary & link to new product
-      const np = data.result.new_product;
+      const np = data.result.blend_product || data.result.new_product || {};
       document.getElementById('resultCard').classList.remove('d-none');
       document.getElementById('resName').textContent = np.name || 'New Blend';
       document.getElementById('resId').textContent = np.id || '—';
@@ -622,6 +633,15 @@
     document.getElementById('modeAbsolute').addEventListener('change', () => setMode('absolute'));
     document.getElementById('targetQty').addEventListener('input', recalc);
     document.getElementById('targetUnit').addEventListener('change', recalc);
+
+    // Remember the last location picked (same key the Execute tab uses)
+    (function () {
+      const sel = document.getElementById('buildLocation');
+      const KEY = 'nstock.blendLocation';
+      try { const saved = localStorage.getItem(KEY); if (saved && [...sel.options].some(o => o.value === saved)) sel.value = saved; } catch (e) {}
+      if (!sel.value && sel.options.length === 2) sel.selectedIndex = 1;
+      sel.addEventListener('change', () => { try { localStorage.setItem(KEY, sel.value); } catch (e) {} });
+    })();
 
     // --- Init ---
     showBlendTab('{{ "execute" if show_exec else "builder" }}');
