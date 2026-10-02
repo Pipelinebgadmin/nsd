@@ -8,6 +8,11 @@
   <script src="{{ url_for('static', filename='js/csrf.js') }}"></script>
 
   <meta charset="utf-8" />
+  {# Tells the form-draft script whether this page is showing an error, so a
+     draft from a failed submit is kept instead of thrown away. #}
+  {% set _has_error = namespace(v=(errors or error) and true) %}
+  {% for cat, _m in get_flashed_messages(with_categories=true) %}{% if cat in ('danger', 'error') %}{% set _has_error.v = true %}{% endif %}{% endfor %}
+  <meta name="nstock-form-error" content="{{ '1' if _has_error.v else '0' }}">
   <title>{{ app_title or "NStock" }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
@@ -45,6 +50,12 @@
     }
     .nstock-menu-btn span { display: block; width: 20px; height: 2px; background: #0f172a; border-radius: 2px; transition: transform .2s, opacity .2s; }
     .nstock-menu-btn:hover { background: #f1f5f9; }
+    .nstock-back-btn {
+      height: 34px; padding: 0 12px 0 8px; border: 1px solid #e2e8f0; background: #fff; border-radius: 8px;
+      display: flex; align-items: center; gap: 4px; color: #334155; font-weight: 500; font-size: .9rem; cursor: pointer;
+    }
+    .nstock-back-btn:hover:not(:disabled) { background: #f1f5f9; color: #0f172a; }
+    .nstock-back-btn:disabled { opacity: .45; cursor: default; }
     .nstock-menu-btn[aria-expanded="true"] span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
     .nstock-menu-btn[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
     .nstock-menu-btn[aria-expanded="true"] span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
@@ -73,6 +84,33 @@
       background: rgba(15, 23, 42, .25); opacity: 0; pointer-events: none; transition: opacity .2s;
     }
     .nstock-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    /* ---- Top bar menu ---- */
+    .nstock-topnav {
+      flex: 1 1 auto; min-width: 0;
+      display: flex; align-items: center; gap: 2px;
+      margin-left: 8px;
+      overflow-x: auto; scrollbar-width: none;
+    }
+    .nstock-topnav::-webkit-scrollbar { display: none; }
+    .nstock-topnav a {
+      flex-shrink: 0; white-space: nowrap;
+      padding: 6px 10px; border-radius: 8px;
+      color: #475569; text-decoration: none; font-weight: 500; font-size: .875rem;
+    }
+    .nstock-topnav a:hover { background: #f1f5f9; color: #0f172a; }
+    .nstock-topnav a.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+    .nstock-topnav a:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+
+    /* Wide screens: menu lives in the top bar, side menu is not used.
+       Narrow screens: links don't fit across the top, so the ☰ side menu comes back. */
+    @media (min-width: 1200px) {
+      .nstock-menu-btn, .nstock-sidebar, .nstock-backdrop { display: none !important; }
+    }
+    @media (max-width: 1199.98px) {
+      /* kept as an empty spacer so the user menu stays on the right */
+      .nstock-topnav { visibility: hidden; }
+    }
 
     /* ---- Maximized-window controls in the header ---- */
     .win-header-controls { display: flex; align-items: center; gap: 2px; padding: 3px 4px 3px 12px;
@@ -106,6 +144,20 @@
   {% set EMBED = request.args.get('embed') == '1' %}
 
   {% if not EMBED %}
+  {# Spreadsheet is hidden until it's ready. To bring it back, add this line under Inventory Overview:
+     ('spreadsheet_page', 'Spreadsheet', 'spreadsheet'), #}
+  {% set nav_items = [
+    ('home', 'Home', None),
+    ('transactions_page', 'Transaction History', 'transactions'),
+    ('inventory_overview', 'Inventory Overview', 'inventory_view'),
+    ('inventory_adjust_page', 'Adjust Inventory', 'adjust_inventory'),
+    ('list_products', 'Products', 'products'),
+    ('alerts_page', 'Reorder Alerts', 'alerts'),
+    ('blend_new_page', 'Blend', ['blending', 'blend_builder']),
+    ('blend_log_page', 'Blend Log', ['blending', 'blend_builder']),
+    ('formulas_page', 'Formula Catalog', 'formulas'),
+    ('locations_page', 'Locations', 'locations'),
+  ] %}
   <!-- ================= HEADER ================= -->
   <header class="nstock-header">
     <button type="button" class="nstock-menu-btn" id="menuBtn"
@@ -113,9 +165,25 @@
       <span></span><span></span><span></span>
     </button>
 
+    <button type="button" class="nstock-back-btn" id="navBackBtn" title="Back to the last page" aria-label="Back">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg>
+      Back
+    </button>
+
     <a href="{{ url_for('home') }}" class="nstock-brand">{{ app_title or "NStock" }}</a>
 
-    <div class="flex-grow-1"></div>
+    <!-- Main menu across the top bar (wide screens) -->
+    <nav class="nstock-topnav" aria-label="Main menu">
+      {% for endpoint, label, feature in nav_items %}
+        {% if feature is none or can(feature) %}
+        <a href="{{ url_for(endpoint) }}" class="{% if request.endpoint == endpoint %}active{% endif %}"
+           {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endif %}
+      {% endfor %}
+      {% if current_user and current_user.role == 'admin' %}
+        <a href="{{ url_for('admin_page') }}" class="{% if request.endpoint == 'admin_page' %}active{% endif %}">Admin</a>
+      {% endif %}
+    </nav>
 
     <!-- Controls for a maximized window appear here (QuickBooks style) -->
     <div id="winHeaderControls" class="win-header-controls" hidden>
@@ -150,19 +218,6 @@
   </header>
 
   <!-- ================= SIDEBAR ================= -->
-  {% set nav_items = [
-    ('home', 'Home', None),
-    ('dashboard', 'Dashboard', 'dashboard'),
-    ('inventory_overview', 'Inventory Overview', 'inventory_view'),
-    ('spreadsheet_page', 'Spreadsheet', 'spreadsheet'),
-    ('inventory_adjust_page', 'Adjust Inventory', 'adjust_inventory'),
-    ('list_products', 'Products', 'products'),
-    ('alerts_page', 'Reorder Alerts', 'alerts'),
-    ('blend_new_page', 'Blend', ['blending', 'blend_builder']),
-    ('blend_log_page', 'Blend Log', ['blending', 'blend_builder']),
-    ('formulas_page', 'Formula Catalog', 'formulas'),
-    ('locations_page', 'Locations', 'locations'),
-  ] %}
   <div class="nstock-backdrop" id="sidebarBackdrop"></div>
   <nav class="nstock-sidebar" id="sidebar" aria-label="Main menu">
     <ul>
@@ -212,6 +267,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/windows.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/nstock-nav.js') }}"></script>
   <script>
     // Sidebar open / close
     (function () {

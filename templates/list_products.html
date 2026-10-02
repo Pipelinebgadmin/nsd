@@ -145,7 +145,7 @@
         <div class="text-muted">
           No products yet.
           {% if can('products_edit') %}<a href="{{ url_for('add_product') }}">Add your first product</a>.{% endif %}
-          Or jump to the <a href="{{ url_for('dashboard') }}">Dashboard</a>.
+          Or go back <a href="{{ url_for('home') }}">Home</a>.
         </div>
       </div>
     {% endif %}

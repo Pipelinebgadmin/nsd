@@ -21,14 +21,20 @@
   margin-bottom:30px;
 }
 
-.workflow-section,
-.tools-section{
+.home-panel{
   background:#fff;
   border:1px solid #e5e7eb;
   border-radius:14px;
   padding:28px;
   box-shadow:0 4px 14px rgba(0,0,0,0.04);
   margin-bottom:24px;
+}
+
+.home-divider{
+  border:0;
+  border-top:1px solid #eef1f4;
+  margin:32px 0 28px 0;
+  opacity:1;
 }
 
 .section-label{
@@ -47,6 +53,7 @@
   align-items:center;
   gap:22px;
   flex-wrap:wrap;
+  margin-bottom:40px; /* space between the workflow row and the tool cards */
 }
 
 .workflow-arrow{
@@ -123,10 +130,10 @@
     Manage products, track inventory, and build blends across every location.
   </div>
 
-  <!-- ================= WORKFLOW ================= -->
-  <div class="workflow-section">
+  <div class="home-panel">
 
-    <div class="section-label">INVENTORY WORKFLOW</div>
+    <!-- ================= WORKFLOW ================= -->
+    <div class="section-label">INVENTORY TOOLS</div>
 
     <div class="workflow-grid">
       {% set wf = namespace(shown=false) %}
@@ -135,7 +142,7 @@
       {% if wf.shown %}<div class="workflow-arrow">→</div>{% endif %}
       <a href="{{ url_for('inventory_adjust_page') }}" class="card-link" data-win data-win-title="Adjust Inventory">
         <div class="workflow-card">
-          <img src="{{ url_for('static', filename='images/adjustinventory.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/adjust-inventory.svg') }}" alt="">
           <div class="card-title">Adjust Inventory</div>
           <div class="card-subtext">Receive & adjust stock</div>
         </div>
@@ -147,7 +154,7 @@
       {% if wf.shown %}<div class="workflow-arrow">→</div>{% endif %}
       <a href="{{ url_for('blend_new_page') }}" class="card-link" data-win data-win-title="Blend">
         <div class="workflow-card">
-          <img src="{{ url_for('static', filename='images/blendbuilder.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/blend.svg') }}" alt="">
           <div class="card-title">Blend</div>
           <div class="card-subtext">Execute from a formula</div>
         </div>
@@ -159,7 +166,7 @@
       {% if wf.shown %}<div class="workflow-arrow">→</div>{% endif %}
       <a href="{{ url_for('staging_page') }}" class="card-link" data-win data-win-title="Staging">
         <div class="workflow-card">
-          <img src="{{ url_for('static', filename='images/staging.svg') }}" alt="">
+          <img src="{{ url_for('static', filename='images/icons/staging.svg') }}" alt="">
           <div class="card-title">Staging</div>
           <div class="card-subtext">Sold, waiting for pickup</div>
         </div>
@@ -169,21 +176,18 @@
 
     </div>
 
-  </div>
+ 
 
-  <!-- ================= INVENTORY TOOLS ================= -->
-  <div class="tools-section">
-
-    <div class="section-label">INVENTORY TOOLS</div>
+    
 
     <div class="tools-grid">
 
-      {% if can('dashboard') %}
-      <a href="{{ url_for('dashboard') }}" class="card-link" data-win data-win-title="Dashboard">
+      {% if can('transactions') %}
+      <a href="{{ url_for('transactions_page') }}" class="card-link" data-win data-win-title="Transaction History">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/dashboard.png') }}">
-          <div class="card-title">Dashboard</div>
-          <div class="card-subtext">KPIs & activity</div>
+          <img src="{{ url_for('static', filename='images/icons/transactions.svg') }}" alt="">
+          <div class="card-title">Transaction History</div>
+          <div class="card-subtext">Every movement, with undo</div>
         </div>
       </a>
       {% endif %}
@@ -191,7 +195,7 @@
       {% if can('inventory_view') %}
       <a href="{{ url_for('inventory_overview') }}" class="card-link" data-win data-win-title="Inventory Overview">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/inventoryoverview.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/inventory-overview.svg') }}" alt="">
           <div class="card-title">Inventory Overview</div>
           <div class="card-subtext">All stock by location</div>
         </div>
@@ -201,7 +205,7 @@
       {% if can('inventory_view') %}
       <a href="{{ url_for('live_inventory_page') }}" class="card-link" data-win data-win-title="Live Inventory">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/live.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/live-inventory.svg') }}" alt="">
           <div class="card-title">Live Inventory</div>
           <div class="card-subtext">Per-location stock</div>
         </div>
@@ -211,27 +215,29 @@
       {% if can('products') %}
       <a href="{{ url_for('list_products') }}" class="card-link" data-win data-win-title="Products">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/products.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/products.svg') }}" alt="">
           <div class="card-title">Products</div>
           <div class="card-subtext">Manage catalog</div>
         </div>
       </a>
       {% endif %}
 
+      {# Spreadsheet hidden until it's ready. Remove this comment wrapper to bring it back.
       {% if can('spreadsheet') %}
       <a href="{{ url_for('spreadsheet_page') }}" class="card-link" data-win data-win-title="Spreadsheet">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/sheets.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/spreadsheet.svg') }}" alt="">
           <div class="card-title">Spreadsheet</div>
           <div class="card-subtext">Bulk edit view</div>
         </div>
       </a>
       {% endif %}
+      #}
 
       {% if can('alerts') %}
       <a href="{{ url_for('alerts_page') }}" class="card-link" data-win data-win-title="Reorder Alerts">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/reorderalerts.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/reorder-alerts.svg') }}" alt="">
           <div class="card-title">Reorder Alerts</div>
           <div class="card-subtext">Low stock thresholds</div>
         </div>
@@ -241,7 +247,7 @@
       {% if can('locations') %}
       <a href="{{ url_for('locations_page') }}" class="card-link" data-win data-win-title="Locations">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/locations.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/locations.svg') }}" alt="">
           <div class="card-title">Locations</div>
           <div class="card-subtext">Tanks & sites</div>
         </div>
@@ -251,7 +257,7 @@
       {% if can('formulas') %}
       <a href="{{ url_for('formulas_page') }}" class="card-link" data-win data-win-title="Formula Catalog">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/formulacatalog.svg') }}">
+          <img src="{{ url_for('static', filename='images/icons/formula-catalog.svg') }}" alt="">
           <div class="card-title">Formula Catalog</div>
           <div class="card-subtext">Saved blend recipes</div>
         </div>
@@ -261,7 +267,7 @@
       {% if can('reports') %}
       <a href="{{ url_for('reports_center') }}" class="card-link" data-win data-win-title="Reports">
         <div class="tool-card">
-          <img src="{{ url_for('static', filename='images/sheets.png') }}">
+          <img src="{{ url_for('static', filename='images/icons/reports.svg') }}" alt="">
           <div class="card-title">Reports</div>
           <div class="card-subtext">Print & export PDFs</div>
         </div>

@@ -159,3 +159,7 @@
 }
 .floating-window.is-left .fw-inner { border-left: 0; }
 .floating-window.is-right .fw-inner { border-right: 0; }
+/* Back button at the left of the title bar */
+.fw-back { flex: 0 0 auto; display: grid; place-items: center; margin: 0 6px 0 -8px; }
+.fw-back:disabled { opacity: .35; cursor: default; background: transparent; }
+.fw-titlebar .fw-title { margin-right: auto; }

@@ -106,69 +106,6 @@
 
       </div>
 
-<!-- Divider -->
-<div style="height:1px; background:#e5e7eb; margin:14px 0;"></div>
-
-      <!-- Assign Unassigned (optional) header + button -->
-      <div class="row-form" style="align-items:flex-end;">
-        <div>
-          <div style="font-weight:700;">Assign chemicals from Unassigned (optional)</div>
-          <div class="text-muted" style="font-size:.85rem; margin-top:4px;">
-            If you already have inventory in “Unassigned,” you can move some into this new location now.
-          </div>
-        </div>
-        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addLine()">
-          + Add Chemical
-        </button>
-      </div>
-
-      <!-- Lines container -->
-      <div id="lines" style="margin-top:8px;">
-
-        {# One line by default #}
-        <div class="assign-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
-          <div class="line-row" style="display:grid; grid-template-columns: 1.6fr 0.6fr 0.6fr auto; gap:12px; align-items:end;">
-
-            <div>
-              <label>Chemical</label>
-              <select name="product_id[]" onchange="syncHint(this)">
-                <option value="" selected>— Select from Unassigned —</option>
-                {% for p in unassigned_products %}
-                  <option value="{{ p['id'] }}"
-                          data-avail="{{ p.get('unassigned_qty', 0) }}"
-                          data-unit="{{ p.get('default_unit','') }}">
-                    {{ p['name'] }} (available: {{ p.get('unassigned_qty',0) }} {{ p.get('default_unit','') }})
-                  </option>
-                {% endfor %}
-              </select>
-              <div class="text-muted avail-hint" style="font-size:.85rem; margin-top:4px;">Available: —</div>
-            </div>
-
-            <div>
-              <label>Quantity</label>
-              <input name="qty[]" inputmode="decimal" placeholder="0">
-            </div>
-
-            <div>
-              <label>Unit</label>
-              <select name="unit[]">
-                <option value="gal">GAL</option>
-                <option value="lb">LB</option>
-                <option value="unit">UNIT</option>
-              </select>
-            </div>
-
-            <div style="display:flex; justify-content:flex-end;">
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeLine(this)">
-                Remove
-              </button>
-            </div>
-
-          </div>
-        </div>
-
-      </div>
-
       <!-- Actions (match add_product.html) -->
       <div class="row-form" style="justify-content:flex-end; gap:8px;">
         <a href="{{ url_for('locations_page') }}" class="btn btn-outline-secondary btn-sm">
@@ -188,75 +125,6 @@
 </div>
 
 <script>
-  function lineTemplate() {
-    return `
-      <div class="assign-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
-        <div class="line-row" style="display:grid; grid-template-columns: 1.6fr 0.6fr 0.6fr auto; gap:12px; align-items:end;">
-
-          <div>
-            <label>Chemical</label>
-            <select name="product_id[]" onchange="syncHint(this)">
-              <option value="" selected>— Select from Unassigned —</option>
-              {% for p in unassigned_products %}
-                <option value="{{ p['id'] }}"
-                        data-avail="{{ p.get('unassigned_qty', 0) }}"
-                        data-unit="{{ p.get('default_unit','') }}">
-                  {{ p['name'] }} (available: {{ p.get('unassigned_qty',0) }} {{ p.get('default_unit','') }})
-                </option>
-              {% endfor %}
-            </select>
-            <div class="text-muted avail-hint" style="font-size:.85rem; margin-top:4px;">Available: —</div>
-          </div>
-
-          <div>
-            <label>Quantity</label>
-            <input name="qty[]" inputmode="decimal" placeholder="0">
-          </div>
-
-          <div>
-            <label>Unit</label>
-            <select name="unit[]">
-              <option value="gal">GAL</option>
-              <option value="lb">LB</option>
-              <option value="unit">UNIT</option>
-            </select>
-          </div>
-
-          <div style="display:flex; justify-content:flex-end;">
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="removeLine(this)">
-              Remove
-            </button>
-          </div>
-
-        </div>
-      </div>
-    `;
-  }
-
-  function addLine() {
-    const wrap = document.getElementById('lines');
-    wrap.insertAdjacentHTML('beforeend', lineTemplate());
-  }
-
-  function removeLine(btn) {
-    const row = btn.closest('.assign-row');
-    if (!row) return;
-
-    const wrap = document.getElementById('lines');
-    const cards = wrap.querySelectorAll('.assign-row');
-
-    // keep at least one line
-    if (cards.length <= 1) {
-      row.querySelectorAll('select, input').forEach(el => {
-        if (el.tagName === 'SELECT') el.selectedIndex = 0;
-        if (el.tagName === 'INPUT') el.value = '';
-      });
-      row.querySelectorAll('.avail-hint').forEach(h => h.textContent = 'Available: —');
-      return;
-    }
-
-    row.remove();
-  }
   function tankTemplate() {
     return `
       <div class="tank-row" style="border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin-bottom:10px;">
@@ -307,32 +175,6 @@
     }
 
     row.remove();
-  }
-
-  function syncHint(selectEl) {
-    const opt = selectEl.options[selectEl.selectedIndex];
-    const avail = opt?.dataset?.avail;
-    const unit  = opt?.dataset?.unit;
-
-    const card = selectEl.closest('.assign-row');
-    const hint = card ? card.querySelector('.avail-hint') : null;
-
-    if (hint) {
-      if (avail !== undefined && unit !== undefined && opt.value) {
-        hint.textContent = `Available: ${avail} ${unit}`;
-      } else {
-        hint.textContent = 'Available: —';
-      }
-    }
-
-    // auto set unit to default (if present)
-    if (card && unit) {
-      const unitSel = card.querySelector('select[name="unit[]"]');
-      if (unitSel) {
-        const match = Array.from(unitSel.options).find(o => o.value === unit);
-        if (match) unitSel.value = unit;
-      }
-    }
   }
 </script>
 

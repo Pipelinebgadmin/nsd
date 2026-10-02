@@ -322,7 +322,7 @@ def logout():
 # -------------------------
 # Each feature a user can be given. Admins always have every feature.
 FEATURES = [
-    ("dashboard",        "Dashboard",             "View the dashboard"),
+    ("transactions",     "Transaction History",   "View every inventory movement (undo is a separate per-user switch)"),
     ("inventory_view",   "Inventory Overview",    "Inventory overview, live inventory, and search"),
     ("products",         "Products",              "View products and product details"),
     ("products_edit",    "Add & Edit Products",   "Create, edit, and delete products"),
@@ -349,10 +349,12 @@ DEFAULT_FEATURES = [k for k in FEATURE_KEYS if k not in ("ledger", "blend_builde
 # Which feature(s) unlock each page. A user needs ANY one of the listed features.
 # Pages shared by several screens (like the inventory API) list every screen that uses them.
 ENDPOINT_FEATURES = {
-    "dashboard": {"dashboard"},
+    "dashboard": {"transactions"},
+    "transactions_page": {"transactions"},
+    "transaction_undo": {"transactions"},
     "inventory_overview": {"inventory_view"},
     "live_inventory_page": {"inventory_view"},
-    "product_search": {"inventory_view", "products", "dashboard"},
+    "product_search": {"inventory_view", "products"},
     "api_location_inventory": {"inventory_view", "adjust_inventory", "blending", "staging", "locations"},
     "list_products": {"products"},
     "product_detail": {"products"},
@@ -466,7 +468,7 @@ def can_see_costs() -> bool:
 # Every logged-in user can reach these.
 ALWAYS_ALLOWED = {"index", "home", "logout", "users_page", "user_profile"}
 # Only admins, regardless of features.
-ADMIN_ONLY = {"admin_page", "admin_sheet_access", "admin_ledger_password"}
+ADMIN_ONLY = {"admin_page", "admin_sheet_access", "admin_ledger_password", "admin_user_can_undo"}
 
 
 def normalize_user(u: dict) -> dict:
@@ -477,7 +479,11 @@ def normalize_user(u: dict) -> dict:
     u.setdefault("phone", "")
     u.setdefault("active", True)
     u.setdefault("features", list(DEFAULT_FEATURES))
+    # Dashboard was replaced by Transaction History: carry the access over
+    if "dashboard" in u["features"]:
+        u["features"] = ["transactions" if f == "dashboard" else f for f in u["features"]]
     u.setdefault("locations", "all")
+    u.setdefault("can_undo", True)
     return u
 
 
@@ -977,20 +983,7 @@ def append_ledger_entry(event_type: str, payload: dict) -> dict:
     Returns the entry that was written.
     """
     entries = load_ledger()
-    prev_hash = entries[-1]["entry_hash"] if entries else GENESIS_HASH
-
-    entry_id = f"LEDG-{len(entries) + 1:07d}"
-    timestamp = now_central_iso()
-
-    entry = {
-        "entry_id": entry_id,
-        "prev_hash": prev_hash,
-        "event_type": event_type,
-        "timestamp": timestamp,
-        "payload": payload,
-    }
-    entry["entry_hash"] = _hash_entry(prev_hash, entry_id, event_type, timestamp, payload)
-
+    entry = _build_ledger_entry(entries, event_type, payload)
     entries.append(entry)
     _save_ledger(entries)
     return entry
@@ -1441,39 +1434,13 @@ def _to_float(x, default=0.0):
 def _safe_str(x):
     return (x or "").strip()
 
-def _product_unassigned_qty(p):
-    # If you already track unassigned_qty, use it.
-    # Otherwise treat current quantity as "unassigned" until you migrate fully.
-    return _to_float(p.get("unassigned_qty", p.get("quantity", 0)))
-
-def _recompute_total_qty(p):
-    unassigned = _to_float(p.get("unassigned_qty", 0))
-    loc_map = p.get("location_qty", {}) or {}
-    loc_sum = sum(_to_float(v) for v in loc_map.values())
-    p["quantity"] = unassigned + loc_sum
-
-
 @app.route("/locations/add", methods=["GET", "POST"])
 def add_location():
-    products = load_products()
     locations = load_locations()
-
-    # build dropdown list from products that have unassigned > 0
-    unassigned_products = []
-    for p in products:
-        avail = _product_unassigned_qty(p)
-        if avail > 0:
-            unassigned_products.append({
-                "id": p["id"],
-                "name": p.get("name", ""),
-                "unassigned_qty": avail,
-                "default_unit": p.get("default_unit", "unit")
-            })
 
     if request.method == "GET":
         return render_template(
             "add_location.html",
-            unassigned_products=unassigned_products,
             form={},
             errors=[]
         )
@@ -1499,45 +1466,8 @@ def add_location():
     # Create location id
     loc_id = uuid.uuid4().hex[:10]
 
-    # Parse chemical assignment arrays
-    product_ids = request.form.getlist("product_id[]")
-    qtys        = request.form.getlist("qty[]")
-    units       = request.form.getlist("unit[]")  # currently unused but kept for future
-
     # -------------------------
-    # 1) VALIDATE product moves (NO mutations yet)
-    # -------------------------
-    prod_by_id = {str(p.get("id")): p for p in products}
-
-    # Track "remaining unassigned" per product as we validate multiple rows
-    remaining = {}
-    for p in products:
-        pid = str(p.get("id"))
-        remaining[pid] = _product_unassigned_qty(p)
-
-    planned_moves = []  # list of (pid, qty)
-    for pid_raw, qty_raw, unit in zip(product_ids, qtys, units):
-        pid = _safe_str(pid_raw)
-        qty = _to_float(qty_raw, default=0.0)
-
-        if not pid or qty <= 0:
-            continue
-
-        prod = prod_by_id.get(pid)
-        if not prod:
-            errors.append(f"Unknown product id: {pid}")
-            continue
-
-        avail = remaining.get(pid, 0.0)
-        if qty > avail + 1e-9:
-            errors.append(f"{prod.get('name','Product')} has only {avail} unassigned available.")
-            continue
-
-        remaining[pid] = avail - qty
-        planned_moves.append((pid, qty))
-
-    # -------------------------
-    # 2) VALIDATE tanks (NO save yet)
+    # 1) VALIDATE tanks (NO save yet)
     # -------------------------
     tanks_to_create = []
     if not errors:
@@ -1584,13 +1514,12 @@ def add_location():
     if errors:
         return render_template(
             "add_location.html",
-            unassigned_products=unassigned_products,
             form=request.form.to_dict(),
             errors=errors
         )
 
     # -------------------------
-    # 3) APPLY changes (mutations) + SAVE (atomic-ish)
+    # 2) APPLY changes (mutations) + SAVE (atomic-ish)
     # -------------------------
 
     # Create location record
@@ -1601,18 +1530,6 @@ def add_location():
         "created_at": datetime.now(timezone.utc).isoformat()
     }
 
-    # Apply planned inventory moves
-    for pid, qty in planned_moves:
-        prod = prod_by_id[pid]
-        avail = _product_unassigned_qty(prod)
-
-        prod["unassigned_qty"] = avail - qty
-        prod.setdefault("location_qty", {})
-        prod["location_qty"][loc_id] = _to_float(prod["location_qty"].get(loc_id, 0.0)) + qty
-
-        # keep total quantity consistent for existing pages
-        _recompute_total_qty(prod)
-
     # Save location
     locations.append(new_loc)
     save_locations(locations)
@@ -1622,9 +1539,6 @@ def add_location():
         tanks = load_tanks()  # re-load, append, save
         tanks.extend(tanks_to_create)
         save_tanks(tanks)
-
-    # Save products
-    save_products(products)
 
     flash("Location created.", "success")
     return redirect(url_for("locations_page"))
@@ -2224,7 +2138,9 @@ def fifo_receive(prod: dict, qty_default: float, recv_cost: float, location: str
     if qty_default <= 0:
         return
 
-    loc = (location or prod.get("location") or "UNASSIGNED").strip() or "UNASSIGNED"
+    loc = (location or "").strip()
+    if not loc:
+        raise ValueError(f"A location is required to receive {prod.get('name') or 'inventory'}.")
 
     prod["layers"].append(
         {
@@ -2270,7 +2186,8 @@ def fifo_issue(prod: dict, qty_default: float) -> dict:
         layer_cost = float(layer["unit_cost"])
 
         take = min(layer_qty, remaining)
-        pulls.append({"qty": round(take, 4), "unit_cost": round(layer_cost, 4)})
+        pulls.append({"qty": round(take, 4), "unit_cost": round(layer_cost, 4),
+                      "location": layer.get("location")})
         issued_value += take * layer_cost
 
         layer["qty"] = layer_qty - take
@@ -2307,8 +2224,11 @@ def fifo_return(prod: dict, pulls: list, location: str | None = None):
         return
 
     unit = normalize_unit(prod.get("default_unit"))
-    base_loc = (location or prod.get("location") or "UNASSIGNED").strip() or "UNASSIGNED"
+    # Each pull goes back to the location it came from; older pulls that didn't
+    # record one fall back to the location passed in, then the product's location.
+    base_loc = (location or prod.get("location") or "").strip()
 
+    back = []
     for p in pulls:
         try:
             q = float(p.get("qty") or 0.0)
@@ -2317,7 +2237,13 @@ def fifo_return(prod: dict, pulls: list, location: str | None = None):
             continue
         if q <= 0:
             continue
+        loc = (p.get("location") or "").strip() or base_loc
+        if not loc:
+            raise ValueError(f"Can't tell which location to return {prod.get('name') or 'inventory'} to.")
+        back.append((q, c, loc))
 
+    # insert oldest-last so the returned layers keep their original FIFO order at the front
+    for q, c, loc in reversed(back):
         prod["layers"].insert(
             0,
             {
@@ -2325,7 +2251,7 @@ def fifo_return(prod: dict, pulls: list, location: str | None = None):
                 "unit": unit,
                 "unit_cost": round(c, 4),
                 "datetime": now_central_iso(),
-                "location": base_loc,
+                "location": loc,
             },
         )
 
@@ -2364,7 +2290,8 @@ def fifo_issue_from_location(prod: dict, qty_default: float, location_name: str)
         layer_cost = float(layer["unit_cost"])
 
         take = min(layer_qty, remaining)
-        pulls.append({"qty": round(take, 4), "unit_cost": round(layer_cost, 4)})
+        pulls.append({"qty": round(take, 4), "unit_cost": round(layer_cost, 4),
+                      "location": layer.get("location")})
 
         issued_value += take * layer_cost
         layer["qty"] = layer_qty - take
@@ -2450,7 +2377,7 @@ def _apply_package_rows_to_blend(blend_product, package_rows, location_id, locat
     return round(total_packaged_gal, 4), summary
 
 
-def execute_formula_blend(products: list, formula: dict, batch_qty: float, batch_unit: str, location: str = "Production",
+def execute_formula_blend(products: list, formula: dict, batch_qty: float, batch_unit: str, location: str | None = None,
                            consume_from_location_only: bool = False, location_id: str | None = None,
                            package_rows: list | None = None, notes: str | None = None):
     """
@@ -2462,6 +2389,8 @@ def execute_formula_blend(products: list, formula: dict, batch_qty: float, batch
 
     if not formula:
         raise BlendError("Formula not found.")
+    if not (location or "").strip():
+        raise BlendError("Please select a location for the blend.")
 
     mode = (formula.get("mode") or "percent").lower()
     if mode != "percent":
@@ -2565,7 +2494,7 @@ def execute_formula_blend(products: list, formula: dict, batch_qty: float, batch
 
     # ---- Create/update finished blend product ----
     blend_name = (formula.get("name") or "Blend").strip()
-    blend_loc = (location or "Production").strip() or "Production"
+    blend_loc = location.strip()
 
     # store blends as GAL inventory (even if user entered LB)
     finished_qty_gal = float(total_gal)
@@ -3184,7 +3113,7 @@ def execute_sourced_formula_blend(products, formula, batch_qty, batch_unit, loca
     entry["blend_new_qty"] = round(float(blend_product.get("quantity") or 0.0), 4)
     return entry
 
-def execute_builder_blend(products: list, name: str, target_qty: float, target_unit: str, mode: str, components: list, location: str = "Production",
+def execute_builder_blend(products: list, name: str, target_qty: float, target_unit: str, mode: str, components: list, location: str | None = None,
                            consume_from_location_only: bool = False, location_id: str | None = None,
                            package_rows: list | None = None, notes: str | None = None):
     """
@@ -3202,7 +3131,9 @@ def execute_builder_blend(products: list, name: str, target_qty: float, target_u
 
     mode = (mode or "percent").lower()
     target_unit = normalize_unit(target_unit)
-    location = (location or "Production").strip() or "Production"
+    location = (location or "").strip()
+    if not location:
+        raise BlendError("Please select a location for the blend.")
 
     try:
         target_qty = float(target_qty or 0.0)
@@ -3695,7 +3626,7 @@ def convert_required_to_product_unit(product, required_in_batch_unit, batch_unit
     raise BlendError(f"Unsupported conversion for batch_unit '{batch_unit}'.")
 
 
-def build_blend(products, name, target_qty, target_unit, mode, components):
+def build_blend(products, name, target_qty, target_unit, mode, components, location=None):
     target_unit = normalize_unit(target_unit)
     if target_unit not in ("gal", "lb"):
         raise BlendError("Target unit must be GAL or LB.")
@@ -3830,7 +3761,7 @@ def build_blend(products, name, target_qty, target_unit, mode, components):
         "supplier": "Blend",
         "package_type": None,
         "package_size_gal": None,
-        "location": "Production",
+        "location": location,
         "notes": "Auto-generated blend",
         "last_updated": now_central_iso(),
     }
@@ -3884,13 +3815,12 @@ def stage_create(products, product_id, qty, unit, customer=None, reason=None, sc
             f"Not enough inventory. Need {qty_default:.4f} {prod.get('default_unit')}, on hand {on_hand:.4f}."
         )
 
-    # FIFO issue at staging time (reserve inventory). When we know the location,
-    # pull only from that location's stock, same as a regular Remove.
+    # FIFO issue at staging time (reserve inventory), only from the chosen
+    # location's stock, same as a regular Remove.
+    if not location_name:
+        raise StagingError("Please select a location.")
     try:
-        if location_name:
-            issue_info = fifo_issue_from_location(prod, qty_default, location_name)
-        else:
-            issue_info = fifo_issue(prod, qty_default)
+        issue_info = fifo_issue_from_location(prod, qty_default, location_name)
     except ValueError as e:
         raise StagingError(str(e))
 
@@ -3978,7 +3908,10 @@ def stage_void(record_id, return_to_inventory=False):
 
                 # 1) bulk quantity goes back at the location it came from, at its original cost
                 migrate_products_to_layers(products)
-                fifo_return(prod, r.get("fifo_pulls") or [], location=r.get("location_name"))
+                try:
+                    fifo_return(prod, r.get("fifo_pulls") or [], location=r.get("location_name"))
+                except ValueError as e:
+                    raise StagingError(str(e))
 
                 # 2) packages that were sold come back as packages
                 pkg_rows = r.get("packages") or []
@@ -4768,10 +4701,8 @@ def product_detail(product_id):
             )
 
 
-        # IMPORTANT: if you’re using FIFO layers, direct edits to quantity/unit_cost can desync layers.
-        # We will:
-        #   - update basic fields
-        #   - if product has layers, we will rebuild layers to a single layer using edited qty/unit_cost (admin override)
+        # Only the product's details change here. Stock (FIFO layers) is left
+        # exactly as it is; it only moves through Receive/Remove/Move/Blend.
         prod.update(
             {
                 "name": name,
@@ -4787,21 +4718,6 @@ def product_detail(product_id):
                 "last_updated": now_central_iso(),
             }
         )
-
-
-        # Admin override: replace layers to match manual qty/unit_cost
-        prod["layers"] = []
-        if quantity > 0:
-            base_loc = (location or prod.get("location") or "UNASSIGNED").strip() or "UNASSIGNED"
-            prod["layers"].append(
-                {
-                    "qty": float(quantity),
-                    "unit": normalize_unit(default_unit),
-                    "unit_cost": float(unit_cost),
-                    "datetime": central_time_now_str(),
-                    "location": base_loc,
-                }
-            )
 
 
         _sync_product_qty_and_avg_cost_from_layers(prod)
@@ -5157,26 +5073,27 @@ def inventory_adjust_page():
 
         # -------------------------
         # REPACKAGE FLOW
-        # Pulls bulk gal/lb out of a location's FIFO layers and records it
-        # as packaged inventory (the inverse of receiving into bulk).
+        # Moves product between containers at ONE location. Sources:
+        #   loose   - Unpackaged stock that isn't sitting in a tank
+        #   tank    - gallons coming out of a tank at this location
+        #   package - packages already on hand being opened (tote -> pails,
+        #             drum -> tank, case -> bottles, ...)
+        # Destinations: any mix of package types and/or tanks.
+        #
+        # Packaging is a view of the bulk FIFO total, not a deduction from it,
+        # so repackaging never touches FIFO or cost -- EXCEPT the optional
+        # "loss" amount (spillage, residue left in the container), which is
+        # issued out of FIFO at cost so it doesn't linger as phantom stock.
+        # When a package is opened and not all of it is refilled, whatever is
+        # left over falls back into Unpackaged automatically, because
+        # Unpackaged = bulk on hand - packaged on hand.
         # -------------------------
         if action == "repackage":
-            if unit not in ("gal", "lb"):
-                errors.append("Repackage supports GAL or LB only.")
-
-            repack_location_id = (request.form.get("location_id") or "").strip() or None
-            repack_loc_name = loc_name_from_id(repack_location_id) if repack_location_id else None
-
-            if not repack_location_id:
-                errors.append("Please select a location.")
-            elif not repack_loc_name:
-                errors.append("Location not found.")
-
-            if errors:
+            def _repack_error(msgs):
                 return render_template(
                     "inventory_adjust.html",
                     app_title=APP_TITLE,
-                    errors=errors,
+                    errors=msgs if isinstance(msgs, list) else [msgs],
                     products=products,
                     staged=load_staging(),
                     locations=locations,
@@ -5185,9 +5102,72 @@ def inventory_adjust_page():
                     form=request.form,
                 )
 
-            # ---- Parse the package rows being filled ----
+            # Older forms had no source field: a picked tank meant "from tank".
+            source_type = (request.form.get("repack_source") or "").strip().lower()
+            if not source_type:
+                source_type = "tank" if (request.form.get("tank_id") or "").strip() else "loose"
+            if source_type not in ("loose", "tank", "package"):
+                errors.append("Pick where the product is coming from.")
+
+            if unit not in ("gal", "lb"):
+                errors.append("Repackage supports GAL or LB only.")
+
+            repack_location_id = (request.form.get("location_id") or "").strip() or None
+            repack_loc_name = loc_name_from_id(repack_location_id) if repack_location_id else None
+            if not repack_location_id:
+                errors.append("Please select a location.")
+            elif not repack_loc_name:
+                errors.append("Location not found.")
+
+            # ---- Optional loss (spillage / residue) ----
+            loss_raw = (request.form.get("loss_qty") or "").strip()
+            loss_unit = normalize_unit((request.form.get("loss_unit") or "gal").strip().lower())
+            loss_qty = 0.0
+            if loss_raw:
+                try:
+                    loss_qty = float(loss_raw)
+                    if loss_qty < 0:
+                        errors.append("Loss can't be negative.")
+                except (ValueError, TypeError):
+                    errors.append("Loss must be a number.")
+            if loss_qty > 0 and loss_unit not in ("gal", "lb"):
+                errors.append("Loss must be in GAL or LB.")
+
+            if errors:
+                return _repack_error(errors)
+
             all_packages = load_packages()
             pkg_by_id = {str(pk.get("id")): pk for pk in all_packages}
+
+            # ---- Source: packages being opened ----
+            src_pkg_def = None
+            src_pkg_id = None
+            src_pkg_qty = 0.0
+            src_vol_per = 0.0
+            src_pkg_unit = "gal"
+            if source_type == "package":
+                src_pkg_id = (request.form.get("source_package_id") or "").strip()
+                src_pkg_def = pkg_by_id.get(src_pkg_id)
+                if not src_pkg_def:
+                    errors.append("Pick the package type you're opening.")
+                try:
+                    src_pkg_qty = float((request.form.get("source_package_qty") or "").strip())
+                    if src_pkg_qty <= 0 or not float(src_pkg_qty).is_integer():
+                        errors.append("Number of packages to open must be a whole number greater than 0.")
+                except (ValueError, TypeError):
+                    errors.append("Number of packages to open must be a number.")
+                if src_pkg_def and not errors:
+                    src_vol_per = float(src_pkg_def.get("volume") or 0.0)
+                    src_pkg_unit = normalize_unit(src_pkg_def.get("unit") or "gal")
+                    on_hand_pkgs = (get_package_inventory_summary_for_location(product_id, repack_location_id)
+                                    .get(src_pkg_id, {}).get("quantity", 0.0))
+                    if src_pkg_qty > on_hand_pkgs + 1e-9:
+                        errors.append(
+                            f"Only {on_hand_pkgs:g} x {src_pkg_def.get('name')} of {prod.get('name')} "
+                            f"on hand at {repack_loc_name}."
+                        )
+
+            # ---- Destination rows: packages and/or tanks being filled ----
             pkg_ids  = request.form.getlist("repackage_package_id[]")
             pkg_qtys = request.form.getlist("repackage_package_qty[]")
 
@@ -5207,12 +5187,13 @@ def inventory_adjust_page():
                 requested_by_pkg[pid] = requested_by_pkg.get(pid, 0.0) + pqty
 
             if not requested_by_pkg and not errors:
-                errors.append("Add at least one package type and quantity to repackage into.")
+                errors.append("Add at least one package type or tank to fill.")
+
+            source_tank_id = (request.form.get("tank_id") or "").strip() if source_type == "tank" else ""
 
             package_rows_parsed = []
-            packaged_default_total = 0.0
-
-            dest_tanks = []   # moving gallons INTO tanks: [(tank_row, gallons)]
+            packaged_default_total = 0.0   # everything going INTO packages + tanks, default unit
+            dest_tanks = []                # [(tank_row, gallons)]
             if prod and not errors:
                 for pid, pqty in requested_by_pkg.items():
                     if pid.startswith("tank:"):
@@ -5224,7 +5205,7 @@ def inventory_adjust_page():
                         if problem:
                             errors.append(problem)
                             continue
-                        if (request.form.get("tank_id") or "").strip() == trow["id"]:
+                        if source_tank_id and source_tank_id == trow["id"]:
                             errors.append(f"You're filling from {trow['name']}, so it can't also be where it's going.")
                             continue
                         try:
@@ -5238,6 +5219,12 @@ def inventory_adjust_page():
                     pkg_def = pkg_by_id.get(pid)
                     if not pkg_def:
                         errors.append("Unknown package type selected.")
+                        continue
+                    if source_type == "package" and pid == src_pkg_id:
+                        errors.append(f"You're opening {pkg_def.get('name')}, so it can't also be what you're filling.")
+                        continue
+                    if not float(pqty).is_integer():
+                        errors.append(f"{pkg_def.get('name')}: number of containers must be a whole number.")
                         continue
 
                     vol_per = float(pkg_def.get("volume") or 0.0)
@@ -5258,57 +5245,17 @@ def inventory_adjust_page():
                     })
 
             if errors:
-                return render_template(
-                    "inventory_adjust.html",
-                    app_title=APP_TITLE,
-                    errors=errors,
-                    products=products,
-                    staged=load_staging(),
-                    locations=locations,
-                    tanks_by_loc=tanks_by_loc,
-                    packages=load_packages(),
-                    form=request.form,
-                )
-
-            # ---- Convert the bulk amount being pulled into the product's default unit ----
-            try:
-                repack_qty_default = convert_to_product_default_unit(prod, qty, unit)
-            except Exception as e:
-                return render_template(
-                    "inventory_adjust.html",
-                    app_title=APP_TITLE,
-                    errors=[str(e)],
-                    products=products,
-                    staged=load_staging(),
-                    locations=locations,
-                    tanks_by_loc=tanks_by_loc,
-                    packages=load_packages(),
-                    form=request.form,
-                )
+                return _repack_error(errors)
 
             packaged_default_total = round(packaged_default_total, 4)
+            default_unit = prod.get("default_unit") or ""
 
-            # Sanity check: packaged volume should match the bulk amount pulled
-            # (catches typos / mismatched rows). Small tolerance for rounding.
-            tolerance = max(0.05, repack_qty_default * 0.01)
-            if abs(packaged_default_total - repack_qty_default) > tolerance:
-                return render_template(
-                    "inventory_adjust.html",
-                    app_title=APP_TITLE,
-                    errors=[
-                        f"Packaged volume ({packaged_default_total:.4f} {prod.get('default_unit')}) doesn't match "
-                        f"the bulk quantity being pulled ({repack_qty_default:.4f} {prod.get('default_unit')}). "
-                        f"Adjust the package rows or the bulk quantity so they match."
-                    ],
-                    products=products,
-                    staged=load_staging(),
-                    locations=locations,
-                    tanks_by_loc=tanks_by_loc,
-                    packages=load_packages(),
-                    form=request.form,
-                )
+            try:
+                loss_default = round(convert_to_product_default_unit(prod, loss_qty, loss_unit), 4) if loss_qty > 0 else 0.0
+            except Exception as e:
+                return _repack_error(f"Loss: {e}")
 
-            # Ensure FIFO layers exist
+            # Ensure FIFO layers exist and work out what's at this location
             migrate_products_to_layers(products)
             _ensure_layers(prod)
 
@@ -5318,61 +5265,112 @@ def inventory_adjust_page():
                 if (layer.get("location") or "UNASSIGNED").strip().lower() == chosen_loc.lower():
                     loc_on_hand += float(layer.get("qty") or 0.0)
 
-            # Packaging does NOT remove anything from the bulk total — the
-            # bulk FIFO qty represents everything physically on hand,
-            # whether it's sitting loose or already sitting in a package.
-            # What we need to check is that we're not trying to package
-            # more than what's currently Unpackaged at this location.
             already_packaged_default = get_packaged_default_qty_for_location(prod, repack_location_id)
             unpackaged_on_hand = max(0.0, loc_on_hand - already_packaged_default)
 
-            # Filling packages out of a tank, or out of loose (non-tank) stock
-            repack_tank, tank_err = tank_choice("tank_id", repack_location_id)
+            repack_tank = None
             repack_gal = None
-            if not tank_err:
-                try:
-                    repack_gal = gallons_from_input(qty, unit, prod)
-                except ValueError as e:
-                    tank_err = str(e) if repack_tank else None
-            if not tank_err and repack_tank:
-                tank_err = tank_issue_problem(repack_tank, product_id, repack_gal)
-            if not tank_err and not repack_tank and repack_gal is not None:
-                in_tanks_gal = product_tank_gal(product_id, repack_location_id)
-                loose_gal = max(0.0, _default_qty_to_gal(prod, unpackaged_on_hand) - in_tanks_gal)
-                if in_tanks_gal > 0 and repack_gal > loose_gal + 1e-6:
-                    tank_err = (f"Only {loose_gal:g} gal of {prod.get('name')} is loose at {chosen_loc}; "
-                                f"{in_tanks_gal:g} gal is in tanks. Pick the tank you're filling from.")
-            if tank_err:
-                return render_template(
-                    "inventory_adjust.html", app_title=APP_TITLE, errors=[tank_err], products=products,
-                    staged=load_staging(), locations=locations, tanks_by_loc=tanks_by_loc,
-                    packages=load_packages(), form=request.form,
-                )
+            src_default = 0.0       # how much the source gives up, default unit
+            leftover_default = 0.0  # package source only: what falls back to Unpackaged
 
-            if repack_qty_default > unpackaged_on_hand + 1e-9:
-                return render_template(
-                    "inventory_adjust.html",
-                    app_title=APP_TITLE,
-                    errors=[
-                        f"Cannot repackage {repack_qty_default:.4f} {prod.get('default_unit')} from {chosen_loc} — "
+            if source_type == "package":
+                try:
+                    src_default = round(convert_to_product_default_unit(prod, src_pkg_qty * src_vol_per, src_pkg_unit), 4)
+                except Exception as e:
+                    return _repack_error(f"{src_pkg_def.get('name')}: {e}")
+
+                used_default = packaged_default_total + loss_default
+                tolerance = max(0.01, src_default * 0.001)
+                if used_default > src_default + tolerance:
+                    return _repack_error(
+                        f"Opening {src_pkg_qty:g} x {src_pkg_def.get('name')} gives {src_default:.4f} {default_unit}, "
+                        f"but you're filling {packaged_default_total:.4f}"
+                        + (f" plus {loss_default:.4f} loss" if loss_default else "")
+                        + f" {default_unit}. Open more packages or fill fewer."
+                    )
+                leftover_default = round(max(0.0, src_default - used_default), 4)
+                if loss_default > loc_on_hand + 1e-9:
+                    return _repack_error(f"Loss is more than the {loc_on_hand:.4f} {default_unit} on hand at {chosen_loc}.")
+
+            else:
+                # Loose or tank: the hidden qty is the destination total worked out
+                # by the page; it should agree with the rows (catches tampering/typos).
+                try:
+                    dest_from_qty = convert_to_product_default_unit(prod, qty, unit)
+                except Exception as e:
+                    return _repack_error(str(e))
+                tolerance = max(0.05, dest_from_qty * 0.01)
+                if abs(packaged_default_total - dest_from_qty) > tolerance:
+                    return _repack_error(
+                        f"Packaged volume ({packaged_default_total:.4f} {default_unit}) doesn't match "
+                        f"the quantity submitted ({dest_from_qty:.4f} {default_unit}). Re-check the package rows."
+                    )
+
+                src_default = round(packaged_default_total + loss_default, 4)
+                try:
+                    repack_gal = round(_default_qty_to_gal(prod, src_default), 4)
+                except Exception as e:
+                    return _repack_error(str(e))
+
+                if source_type == "tank":
+                    repack_tank, tank_err = tank_choice("tank_id", repack_location_id)
+                    if not tank_err and not repack_tank:
+                        tank_err = "Pick the tank you're filling from."
+                    if not tank_err:
+                        tank_err = tank_issue_problem(repack_tank, product_id, repack_gal)
+                    if tank_err:
+                        return _repack_error(tank_err)
+                else:
+                    in_tanks_gal = product_tank_gal(product_id, repack_location_id)
+                    try:
+                        loose_gal = max(0.0, _default_qty_to_gal(prod, unpackaged_on_hand) - in_tanks_gal)
+                    except Exception:
+                        loose_gal = None
+                    if loose_gal is not None and in_tanks_gal > 0 and repack_gal > loose_gal + 1e-6:
+                        return _repack_error(
+                            f"Only {loose_gal:g} gal of {prod.get('name')} is loose at {chosen_loc}; "
+                            f"{in_tanks_gal:g} gal is in tanks. Pick \"A tank\" under Coming from."
+                        )
+
+                if src_default > unpackaged_on_hand + 1e-9:
+                    return _repack_error(
+                        f"Cannot repackage {src_default:.4f} {default_unit} from {chosen_loc} — "
                         f"only {unpackaged_on_hand:.4f} Unpackaged on hand at that location "
                         f"({loc_on_hand:.4f} total, {already_packaged_default:.4f} already packaged)."
-                    ],
-                    products=products,
-                    staged=load_staging(),
-                    locations=locations,
-                    tanks_by_loc=tanks_by_loc,
-                    packages=load_packages(),
-                    form=request.form,
-                )
+                    )
 
-            # ---- Record it as packaged inventory ----
-            # NOTE: we intentionally do NOT call fifo_issue_from_location
-            # here. Repackaging reorganizes existing inventory into
-            # containers — it doesn't remove it from the location or the
-            # product's total. Only an actual sale/removal should reduce
-            # the bulk FIFO total.
+            # ================= All checks passed: write =================
+            repack_group = "RPK-" + uuid.uuid4().hex[:10].upper()
+            stamp_time = now_central_iso()
+
+            # 1) Loss leaves the books at FIFO cost (the only FIFO change here)
+            loss_info = None
+            if loss_default > 0:
+                try:
+                    loss_info = fifo_issue_from_location(prod, loss_default, chosen_loc)
+                except ValueError as e:
+                    return _repack_error(str(e))
+
+            # 2) Package records: opened packages out, new packages in
             pki_records = load_package_inventory()
+            if source_type == "package":
+                pki_records.append({
+                    "id":            generate_next_pki_id(pki_records),
+                    "product_id":    str(product_id),
+                    "package_id":    src_pkg_id,
+                    "package_name":  src_pkg_def.get("name"),
+                    "quantity":      -src_pkg_qty,
+                    "volume_per":    src_vol_per,
+                    "unit":          src_pkg_unit,
+                    "total_volume":  round(-src_pkg_qty * src_vol_per, 4),
+                    "location_id":   repack_location_id,
+                    "location_name": repack_loc_name,
+                    "received_at":   None,
+                    "removed_at":    stamp_time,
+                    "type":          "repackage_out",
+                    "repack_group":  repack_group,
+                    "notes":         notes,
+                })
             for row in package_rows_parsed:
                 pki_records.append({
                     "id":            generate_next_pki_id(pki_records),
@@ -5385,45 +5383,85 @@ def inventory_adjust_page():
                     "total_volume":  round(row["qty"] * row["volume_per"], 4),
                     "location_id":   repack_location_id,
                     "location_name": repack_loc_name,
-                    "received_at":   now_central_iso(),
+                    "received_at":   stamp_time,
                     "type":          "repackage",
+                    "repack_group":  repack_group,
                     "notes":         notes,
                 })
             save_package_inventory(pki_records)
+
+            # 3) Tanks
+            if source_type == "package":
+                source_label = f"{src_pkg_qty:g} x {src_pkg_def.get('name')}"
+            elif repack_tank:
+                source_label = repack_tank["name"]
+            else:
+                source_label = "loose stock"
+
             if repack_tank:
                 apply_tank_issue(repack_tank["id"], prod, repack_gal, "gal", source="repackage",
-                                 notes=notes or "Filled packages from tank")
+                                 ref=repack_group, notes=notes or "Filled packages from tank")
             for trow, g in dest_tanks:
                 apply_tank_receive(trow["id"], prod, g, "gal", source="repackage",
-                                   notes=notes or ("Moved from " + (repack_tank["name"] if repack_tank else "loose stock")))
+                                   ref=repack_group, notes=notes or ("Moved from " + source_label))
 
-            package_breakdown_label = ", ".join(
+            # 4) Audit trail
+            append_ledger_entry("repackage", {
+                "repack_group":   repack_group,
+                "product_id":     str(product_id),
+                "product_name":   prod.get("name"),
+                "location_id":    repack_location_id,
+                "location":       chosen_loc,
+                "source_type":    source_type,
+                "source":         (
+                    {"package_id": src_pkg_id, "package_name": src_pkg_def.get("name"), "qty": src_pkg_qty}
+                    if source_type == "package"
+                    else {"tank_id": repack_tank["id"], "tank_name": repack_tank["name"]} if repack_tank
+                    else {"loose": True}
+                ),
+                "source_qty":     src_default,
+                "packages_in":    [{"package_id": r["package_id"], "package_name": r["package_name"], "qty": r["qty"]}
+                                   for r in package_rows_parsed],
+                "tanks_in":       [{"tank_id": t["id"], "tank_name": t["name"], "gal": g} for t, g in dest_tanks],
+                "filled_qty":     packaged_default_total,
+                "loss_qty":       loss_default,
+                "loss_value":     (loss_info or {}).get("issued_value", 0.0),
+                "leftover_to_unpackaged": leftover_default,
+                "unit":           default_unit,
+                "by":             (current_user() or {}).get("username"),
+                "notes":          notes,
+            })
+
+            # 5) Product notes + save (FIFO changed only if there was a loss)
+            dest_label = ", ".join(
                 [f"{row['qty']:g} x {row['package_name']}" for row in package_rows_parsed]
                 + [f"{g:g} gal into {t['name']}" for t, g in dest_tanks]
             )
-
-            still_unpackaged = round(max(0.0, unpackaged_on_hand - repack_qty_default), 4)
+            still_unpackaged = round(max(
+                0.0,
+                (loc_on_hand - loss_default) - get_packaged_default_qty_for_location(prod, repack_location_id),
+            ), 4)
 
             prod["last_updated"] = central_time_now_str()
             if notes:
                 existing = (prod.get("notes") or "").strip()
                 stamp = (
-                    f"[Packaged {repack_qty_default:.4f} {prod.get('default_unit','')} into "
-                    f"{package_breakdown_label} @ {now_central_iso()} | {chosen_loc} "
-                    f"(Unpackaged remaining: {still_unpackaged:.4f} {prod.get('default_unit','')})]"
+                    f"[Repackaged {source_label} into {dest_label} @ {stamp_time} | {chosen_loc} | {repack_group}"
+                    + (f" | loss {loss_default:.4f} {default_unit}" if loss_default else "")
+                    + "]"
                 )
                 prod["notes"] = (existing + "\n" + stamp + " " + notes).strip() if existing else (stamp + " " + notes)
 
             save_products(products)
-            flash(
-                f"Packaged {repack_qty_default:.4f} {prod.get('default_unit')} of {prod.get('name')} "
-                f"into {package_breakdown_label}"
-                + (f" from {repack_tank['name']}" if repack_tank else "")
-                + f". Unpackaged remaining at {chosen_loc}: {still_unpackaged:.4f} {prod.get('default_unit')}.",
-                "success",
-            )
-            return redirect(next_url or url_for("inventory_adjust_page"))
 
+            msg = f"Repackaged {prod.get('name')}: {source_label} → {dest_label}."
+            if leftover_default > 0:
+                msg += f" {leftover_default:.4f} {default_unit} left over went back to Unpackaged."
+            if loss_default > 0:
+                msg += f" Recorded {loss_default:.4f} {default_unit} loss."
+            msg += f" Unpackaged at {chosen_loc}: {still_unpackaged:.4f} {default_unit}."
+            flash(msg, "success")
+            return redirect(next_url or url_for("inventory_adjust_page"))
 
         # -------------------------
         # ADD / REMOVE FLOW (UPDATED for location_id)
@@ -5433,9 +5471,6 @@ def inventory_adjust_page():
         # HTML uses location_id for Receive + Remove
         location_id = (request.form.get("location_id") or "").strip() or None
         effective_location = loc_name_from_id(location_id) if location_id else None
-        if not effective_location and prod:
-            # optional fallback (keeps older products working)
-            effective_location = (prod.get("location") or None)
 
         stage_flag = (request.form.get("stage") or "").lower() in ("1", "true", "yes", "on")
         customer = (request.form.get("customer") or "").strip() or None
@@ -5867,10 +5902,15 @@ def staging_create_route():
     reason = data.get("reason")
     scheduled_date = data.get("scheduled_date")
     notes = data.get("notes")
+    location_id = str(data.get("location_id") or "").strip()
+    loc = get_location_by_id(load_locations_for_user(), location_id) if location_id else None
+    if not loc:
+        return {"ok": False, "errors": ["Please select a location."]}, 400
 
     products = load_products()
     try:
-        rec = stage_create(products, product_id, qty, unit, customer, reason, scheduled_date, notes)
+        rec = stage_create(products, product_id, qty, unit, customer, reason, scheduled_date, notes,
+                           location_id=loc["id"], location_name=loc.get("name"))
     except StagingError as e:
         return {"ok": False, "errors": [str(e)]}, 400
     return {"ok": True, "record": rec}, 200
@@ -6206,7 +6246,7 @@ def blend_build():
                                            location=location, location_id=location_id)
             new_id = result["blend_product"]["id"]
         else:
-            result = build_blend(products, name, target_qty, target_unit, mode, components)
+            result = build_blend(products, name, target_qty, target_unit, mode, components, location=location)
             new_id = result["new_product"]["id"]
     except BlendError as e:
         return {"ok": False, "errors": [str(e)]}, 400
@@ -6983,10 +7023,13 @@ def receive_inventory(product_id):
         flash("Quantity must be > 0 and cost must be ≥ 0.", "danger")
         return redirect(url_for("product_detail", product_id=product_id))
 
-    # 🔹 NEW: optional location on this receive
-    # (if your product detail form has an input/select called "location")
-    location_raw = (request.form.get("location") or "").strip()
-    effective_location = location_raw or (p.get("location") or None)
+    # Every receive must land at a real location (never "Unassigned")
+    location_id = (request.form.get("location_id") or "").strip()
+    loc = get_location_by_id(load_locations_for_user(), location_id) if location_id else None
+    if not loc:
+        flash("Please select a location.", "danger")
+        return redirect(url_for("product_detail", product_id=product_id))
+    effective_location = loc.get("name")
 
     migrate_products_to_layers(products)
 
@@ -7219,20 +7262,8 @@ def event_ledger_lock():
 
 @app.route("/dashboard")
 def dashboard():
-    kpis = compute_inventory_value()
-    rows, top5 = compute_reorder_alerts_with_status()
-    triggered_count = sum(1 for r in rows if (r.get("ratio") is not None) and (r["ratio"] < 1.0))
-    total_alerts = len(rows)
-    staging_active_count = count_active_staging()
-
-    return render_template(
-        "dashboard.html",
-        kpis=kpis,
-        top5_alerts=top5,
-        alerts_triggered=triggered_count,
-        alerts_total=total_alerts,
-        staging_active_count=staging_active_count,
-    )
+    """The Dashboard was replaced by Transaction History; old links land there."""
+    return redirect(url_for("transactions_page"))
 
 
 @app.route("/inventory-overview")
@@ -8288,17 +8319,26 @@ def build_blend_cost_report(formula_ids=None):
 def build_cycle_count_sheet(location_filter, count):
     products = load_products()
 
-    if location_filter and location_filter.strip().upper() != "ALL":
-        loc_key = location_filter.strip().lower()
-        pool = []
-        for p in products:
-            _ensure_layers(p)
-            layer_locs = {(l.get("location") or "").strip().lower() for l in p.get("layers", [])}
-            base_loc = (p.get("location") or "").strip().lower()
-            if loc_key == base_loc or loc_key in layer_locs:
-                pool.append(p)
-    else:
-        pool = list(products)
+    filtered = bool(location_filter and location_filter.strip().upper() != "ALL")
+    loc_key = location_filter.strip().lower() if filtered else None
+    pool = []  # (product, location name)
+    for p in products:
+        _ensure_layers(p)
+        locs = {}
+        for l in p.get("layers", []):
+            name = (l.get("location") or "").strip()
+            if name and float(l.get("qty") or 0) > 0:
+                locs.setdefault(name.lower(), name)
+        base = (p.get("location") or "").strip()
+        if base:
+            locs.setdefault(base.lower(), base)
+        if filtered:
+            if loc_key in locs:
+                pool.append((p, locs[loc_key]))
+        elif locs:
+            pool.extend((p, name) for name in locs.values())
+        else:
+            pool.append((p, ""))
 
     try:
         count = int(count)
@@ -8309,14 +8349,14 @@ def build_cycle_count_sheet(location_filter, count):
 
     chosen = random.sample(pool, count) if pool else []
     rows = []
-    for p in chosen:
+    for p, loc_name in chosen:
         rows.append({
             "product_id": p.get("id"),
             "product_name": p.get("name") or "(unnamed)",
-            "location": location_filter if (location_filter and location_filter.strip().upper() != "ALL") else (p.get("location") or ""),
+            "location": loc_name,
             "default_unit": normalize_unit(p.get("default_unit")),
         })
-    rows.sort(key=lambda x: (x["product_name"] or "").lower())
+    rows.sort(key=lambda x: ((x["product_name"] or "").lower(), (x["location"] or "").lower()))
     return rows
 
 
@@ -8498,32 +8538,226 @@ def pdf_blend_cost(reports):
     return _build_pdf_buffer(build)
 
 
-def pdf_blend_instruction(formula, products_by_id):
-    from reportlab.platypus import Paragraph, Spacer
+def build_blend_instruction_report(formula, batch_qty, batch_unit, location_id=None, tank_id=None):
+    """
+    Everything the Blend Instruction report shows, computed with live inventory.
 
-    def build(elements):
-        styles = _get_report_styles()
-        _pdf_header(elements, styles, f'Blend Instruction — {formula.get("name") or "(unnamed formula)"}', [
-            f"Generated {now_central_str()}",
-        ])
-        target_unit = (formula.get("defaults") or {}).get("target_unit") or "gal"
-        elements.append(Paragraph(f"Batch basis: 100 {target_unit} (scale proportionally for your batch size)", styles["Normal"]))
+    Quantities use the same rule as executing a blend (plan_formula_requirements /
+    convert_required_to_product_unit): a formula's percentages apply in the unit the
+    batch is entered in, so a GAL batch is % by volume and an LB batch is % by weight.
+    Each component converts between gal and lbs with its OWN weight (lb/gal).
+    """
+    warnings = []
+    batch_unit = normalize_unit(batch_unit or "gal")
+    if batch_unit not in ("gal", "lb"):
+        batch_unit = "gal"
+        warnings.append("Batch unit must be GAL or LB; using GAL.")
+    try:
+        batch_qty = float(batch_qty)
+    except (TypeError, ValueError):
+        batch_qty = 0.0
+    if batch_qty <= 0:
+        warnings.append("Enter a batch size greater than 0.")
+    basis = "volume" if batch_unit == "gal" else "weight"
+
+    locations = load_locations_safe()
+    loc = get_location_by_id(locations, location_id) if location_id else None
+    loc_name = (loc or {}).get("name")
+    if not loc:
+        warnings.append("No blend location chosen: on-hand at the blend location can't be checked.")
+    tank_name = None
+    if tank_id:
+        t = get_tank_by_id(load_tanks(), tank_id)
+        if not t or str(t.get("location_id")) != str(location_id):
+            warnings.append("The selected tank isn't at the selected location.")
+        else:
+            tank_name = t.get("name") or str(t.get("id"))
+
+    products = load_products()  # live at the moment of printing
+    migrate_products_to_layers(products)
+    by_id = {str(p.get("id")): p for p in products}
+    loc_key = (loc_name or "").strip().lower()
+
+    rows = []
+    for c in formula.get("components") or []:
+        pid = str(c.get("product_id") or "")
+        pct = _safe_float(c.get("percent"), 0.0)
+        prod = by_id.get(pid)
+        name = (prod or {}).get("name") or f"(missing product {pid})"
+        row = {"product_id": pid, "name": name, "percent": pct, "need_gal": None, "need_lb": None,
+               "loc_gal": None, "loc_lb": None, "all_gal": None, "all_lb": None,
+               "status": "—", "short_gal": None, "short_lb": None}
+        rows.append(row)
+        if not prod:
+            warnings.append(f"The formula uses a product that no longer exists (id {pid}).")
+            continue
+
+        w = _safe_float(prod.get("weight"), 0.0)
+        part = pct / 100.0 * batch_qty  # this component's share, in the batch unit
+        if batch_unit == "gal":
+            row["need_gal"] = part
+            row["need_lb"] = part * w if w > 0 else None
+        else:
+            row["need_lb"] = part
+            row["need_gal"] = part / w if w > 0 else None
+        if w <= 0:
+            warnings.append(f"{name} has no weight (lb/gal) set, so its "
+                            f"{'lbs' if batch_unit == 'gal' else 'gallons'} can't be worked out.")
+
+        layers = prod.get("layers") or []
+        all_qty = sum(float(l.get("qty") or 0.0) for l in layers)
+        loc_qty = sum(float(l.get("qty") or 0.0) for l in layers
+                      if (l.get("location") or "").strip().lower() == loc_key) if loc else None
+        row["all_gal"], row["all_lb"] = _qty_gal_lb(prod, all_qty)
+        if loc_qty is not None:
+            row["loc_gal"], row["loc_lb"] = _qty_gal_lb(prod, loc_qty)
+
+        # Short / OK against the blend location (that's where a blend pulls from)
+        if loc_qty is not None and batch_qty > 0:
+            if row["need_gal"] is not None and row["loc_gal"] is not None:
+                short = row["need_gal"] - row["loc_gal"]
+                row["short_gal"] = short if short > 1e-6 else None
+                if row["short_gal"] is not None and w > 0:
+                    row["short_lb"] = row["short_gal"] * w
+            elif row["need_lb"] is not None and row["loc_lb"] is not None:
+                short = row["need_lb"] - row["loc_lb"]
+                row["short_lb"] = short if short > 1e-6 else None
+            else:
+                row["status"] = "CHECK"
+                warnings.append(f"{name}: can't compare need vs. on-hand (missing weight or package size).")
+                continue
+            row["status"] = "SHORT" if (row["short_gal"] or row["short_lb"]) else "OK"
+
+    total_pct = sum(r["percent"] for r in rows)
+    sum_gal = sum(r["need_gal"] for r in rows) if all(r["need_gal"] is not None for r in rows) else None
+    sum_lb = sum(r["need_lb"] for r in rows) if all(r["need_lb"] is not None for r in rows) else None
+    # The batch size in the entered unit is exact; the other unit is what the components add up to.
+    batch_gal = batch_qty if batch_unit == "gal" else sum_gal
+    batch_lb = batch_qty if batch_unit == "lb" else sum_lb
+
+    if not rows:
+        warnings.append("This formula has no components.")
+    if abs(total_pct - 100.0) > 0.001:
+        warnings.append(f"Percentages add up to {total_pct:.3f}%, not 100%. Fix the formula before blending.")
+    entered_sum = sum_gal if batch_unit == "gal" else sum_lb
+    if batch_qty > 0 and entered_sum is not None and abs(entered_sum - batch_qty) > 0.001:
+        warnings.append(f"Component quantities add up to {entered_sum:,.3f} {batch_unit.upper()}, "
+                        f"not the {batch_qty:,.3f} {batch_unit.upper()} batch size.")
+    shorts = [r["name"] for r in rows if r["status"] == "SHORT"]
+
+    return {
+        "formula": formula, "blend_name": (formula.get("name") or "Blend").strip(),
+        "batch_qty": batch_qty, "batch_unit": batch_unit, "batch_gal": batch_gal, "batch_lb": batch_lb,
+        "basis": basis, "location_id": location_id, "location_name": loc_name, "tank_name": tank_name,
+        "rows": rows, "total_pct": total_pct, "sum_gal": sum_gal, "sum_lb": sum_lb,
+        "warnings": warnings, "shorts": shorts,
+        "printed_at": now_central_str(),
+        "printed_by": user_display_name(current_user() or {}) or "—",
+    }
+
+
+def _bi_num(v, d=2):
+    return "—" if v is None else f"{v:,.{d}f}"
+
+
+def pdf_blend_instruction(rep):
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+
+    styles = _get_report_styles()
+    styles.add(ParagraphStyle(name="Warn", fontSize=10, leading=13, textColor=colors.HexColor("#b91c1c"),
+                              fontName="Helvetica-Bold"))
+    f = rep["formula"]
+    elements = []
+    where = rep["location_name"] or "(no location chosen)"
+    if rep["tank_name"]:
+        where += f" — Tank {rep['tank_name']}"
+    basis_txt = "BY VOLUME (batch entered in GAL)" if rep["basis"] == "volume" else "BY WEIGHT (batch entered in LBS)"
+    _pdf_header(elements, styles, f"Blend Instructions — {rep['blend_name']}", [
+        f"<b>Formula:</b> {f.get('name') or '(unnamed)'} &nbsp;(ID {f.get('id')}"
+        + (f", updated {str(f.get('updated_at'))[:10]}" if f.get("updated_at") else "") + ")",
+        f"<b>Batch size:</b> {_bi_num(rep['batch_gal'])} gal &nbsp;/&nbsp; {_bi_num(rep['batch_lb'])} lbs",
+        f"<b>Made at:</b> {where}",
+        f"<b>Percentages are {basis_txt}</b>",
+        f"<b>Date:</b> {rep['printed_at']} &nbsp;&nbsp; <b>Printed by:</b> {rep['printed_by']}"
+        f" &nbsp;&nbsp; <i>Inventory is live as of this time.</i>",
+    ])
+
+    for w in rep["warnings"]:
+        elements.append(Paragraph("WARNING: " + w, styles["Warn"]))
+    if rep["shorts"]:
+        elements.append(Paragraph("SHORT on: " + ", ".join(rep["shorts"]) + ". Not enough on hand at "
+                                  + (rep["location_name"] or "the blend location") + ".", styles["Warn"]))
+    if rep["warnings"] or rep["shorts"]:
+        elements.append(Spacer(1, 8))
+
+    hdr = ParagraphStyle(name="BiHead", fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=colors.white)
+    hdr_r = ParagraphStyle(name="BiHeadR", parent=hdr, alignment=2)
+    cell = ParagraphStyle(name="BiCell", fontName="Helvetica", fontSize=8.5, leading=10.5)
+    short_style = ParagraphStyle(name="BiShort", parent=cell, fontName="Helvetica-Bold",
+                                 textColor=colors.HexColor("#b91c1c"))
+    ok_style = ParagraphStyle(name="BiOk", parent=cell, fontName="Helvetica-Bold", textColor=colors.HexColor("#15803d"))
+    at = rep["location_name"] or "location"
+    data = [
+        [Paragraph("Component", hdr)] + [Paragraph(h, hdr_r) for h in (
+            "% of blend", "Need<br/>(gal)", "Need<br/>(lbs)", f"On hand @ {at}<br/>(gal)", f"On hand @ {at}<br/>(lbs)",
+            "All locations<br/>(gal)", "All locations<br/>(lbs)")] + [Paragraph("Status", hdr)],
+    ]
+    for r in rep["rows"]:
+        if r["status"] == "SHORT":
+            parts = []
+            if r["short_gal"] is not None:
+                parts.append(f"{_bi_num(r['short_gal'])} gal")
+            if r["short_lb"] is not None:
+                parts.append(f"{_bi_num(r['short_lb'])} lbs")
+            status = Paragraph("SHORT<br/>missing " + "<br/>".join(parts), short_style)
+        else:
+            status = Paragraph(r["status"], ok_style if r["status"] == "OK" else cell)
+        data.append([Paragraph(r["name"], cell), f"{r['percent']:.2f}%", _bi_num(r["need_gal"]), _bi_num(r["need_lb"]),
+                     _bi_num(r["loc_gal"]), _bi_num(r["loc_lb"]), _bi_num(r["all_gal"]), _bi_num(r["all_lb"]), status])
+    data.append(["TOTAL", f"{rep['total_pct']:.2f}%", _bi_num(rep["sum_gal"]), _bi_num(rep["sum_lb"]),
+                 "", "", "", "", ""])
+
+    t = Table(data, colWidths=[140, 56, 64, 72, 76, 80, 70, 76, 86], repeatRows=1)
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#f4f6f8")]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d9dee3")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (-2, -1), "RIGHT"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 1.2, colors.HexColor("#2c3e50")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    for i, r in enumerate(rep["rows"], start=1):
+        if r["status"] == "SHORT":
+            style.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#fde2e2")))
+    if abs(rep["total_pct"] - 100.0) > 0.001:
+        style += [("TEXTCOLOR", (1, -1), (1, -1), colors.HexColor("#b91c1c"))]
+    t.setStyle(TableStyle(style))
+    elements.append(t)
+
+    elements.append(Spacer(1, 8))
+    elements.append(Paragraph(
+        "Gal/lbs conversions use each component's own weight per gallon. Totals: percentages must equal 100% and "
+        f"component {'gallons' if rep['basis'] == 'volume' else 'pounds'} must equal the batch size.",
+        styles["ReportSubtitle"]))
+    if f.get("description"):
         elements.append(Spacer(1, 10))
+        elements.append(Paragraph("Notes", styles["SectionHeading"]))
+        elements.append(Paragraph(f["description"], styles["Normal"]))
 
-        rows = [["Component", "Percent", "Qty for 100 gal batch"]]
-        for c in (formula.get("components") or []):
-            product = products_by_id.get(str(c.get("product_id")))
-            pname = product.get("name") if product else str(c.get("product_id"))
-            pct = float(c.get("percent") or 0.0)
-            rows.append([pname, f"{pct:.2f}%", f"{pct:.2f} gal"])
-        elements.append(_make_table(rows, [250, 100, 150], align_right_cols=[1, 2]))
-
-        if formula.get("description"):
-            elements.append(Spacer(1, 12))
-            elements.append(Paragraph("Notes", styles["SectionHeading"]))
-            elements.append(Paragraph(formula["description"], styles["Normal"]))
-
-    return _build_pdf_buffer(build)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(letter), leftMargin=36, rightMargin=36,
+                            topMargin=36, bottomMargin=32, title=f"Blend Instructions — {rep['blend_name']}")
+    doc.build(elements)
+    buf.seek(0)
+    return buf
 
 
 def pdf_cycle_count(rows, location):
@@ -8545,6 +8779,25 @@ def pdf_cycle_count(rows, location):
 # -------------------------
 # Report Center — routes
 # -------------------------
+
+def _pdf_response(buf, filename):
+    """Send a report PDF.
+
+    ?download=1 saves it as a file; otherwise it opens in the browser's PDF
+    viewer (new tab) so it can be printed or saved from there. Reports are
+    opened from inside floating windows (iframes), and some browsers — Safari
+    especially — silently drop a download started inside an iframe, so the
+    report pages link these outside the window (target=_blank / _top).
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("_") or "report.pdf"
+    if not safe.lower().endswith(".pdf"):
+        safe += ".pdf"
+    resp = send_file(buf, mimetype="application/pdf",
+                     as_attachment=request.args.get("download") == "1",
+                     download_name=safe, max_age=0)
+    resp.headers["Cache-Control"] = "no-store"  # numbers must be live, never a cached copy
+    return resp
+
 
 @app.route("/reports")
 def reports_center():
@@ -8571,7 +8824,7 @@ def report_inventory_value_pdf():
     end_s = request.args.get("end_date", "")
     data = build_inventory_value_report(location, _parse_report_date(start_s), _parse_report_date(end_s))
     buf = pdf_inventory_value(data, location, start_s, end_s)
-    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name="total_inventory_value.pdf")
+    return _pdf_response(buf, "total_inventory_value.pdf")
 
 
 @app.route("/reports/avg-cost")
@@ -8594,7 +8847,7 @@ def report_avg_cost_pdf():
     end_s = request.args.get("end_date", "")
     data = build_avg_cost_report(location, _parse_report_date(start_s), _parse_report_date(end_s))
     buf = pdf_avg_cost(data, location, start_s, end_s)
-    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name="avg_cost_of_goods.pdf")
+    return _pdf_response(buf, "avg_cost_of_goods.pdf")
 
 
 @app.route("/reports/inventory-listing")
@@ -8617,7 +8870,7 @@ def report_inventory_listing_pdf():
     end_s = request.args.get("end_date", "")
     data = build_inventory_value_report(location, _parse_report_date(start_s), _parse_report_date(end_s))
     buf = pdf_inventory_listing(data, location, start_s, end_s, show_costs=can_see_costs())
-    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name="total_inventory_report.pdf")
+    return _pdf_response(buf, "total_inventory_report.pdf")
 
 
 @app.route("/reports/blend-cost")
@@ -8636,35 +8889,44 @@ def report_blend_cost_pdf():
     selected = request.args.getlist("formula_id")
     data = build_blend_cost_report(selected or None)
     buf = pdf_blend_cost(data)
-    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name="blend_cost_report.pdf")
+    return _pdf_response(buf, "blend_cost_report.pdf")
 
 
 @app.route("/reports/blend-instruction")
 def report_blend_instruction():
-    formulas = load_formulas()
-    formula_id = request.args.get("formula_id") or (formulas[0]["id"] if formulas else None)
-    formula = get_formula_by_id(formulas, formula_id) if formula_id else None
-    products = load_products()
-    products_by_id = {str(p.get("id")): p for p in products}
-    return render_template(
-        "report_blend_instruction.html", app_title=APP_TITLE,
-        formulas=formulas, formula=formula, products_by_id=products_by_id,
-    )
+    rep, ctx = _blend_instruction_request()
+    return render_template("report_blend_instruction.html", app_title=APP_TITLE, rep=rep, **ctx)
 
 
 @app.route("/reports/blend-instruction/pdf")
 def report_blend_instruction_pdf():
-    formulas = load_formulas()
-    formula_id = request.args.get("formula_id")
-    formula = get_formula_by_id(formulas, formula_id)
-    if not formula:
+    rep, ctx = _blend_instruction_request()
+    if not rep:
         flash("Formula not found.", "danger")
         return redirect(url_for("report_blend_instruction"))
-    products = load_products()
-    products_by_id = {str(p.get("id")): p for p in products}
-    buf = pdf_blend_instruction(formula, products_by_id)
-    fname = f'blend_instruction_{(formula.get("name") or "formula").replace(" ", "_")}.pdf'
-    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name=fname)
+    buf = pdf_blend_instruction(rep)
+    fname = f'blend_instructions_{rep["blend_name"].replace(" ", "_")}_{rep["batch_qty"]:g}{rep["batch_unit"]}.pdf'
+    return _pdf_response(buf, fname)
+
+
+def _blend_instruction_request():
+    """Read the report options from the query string (shared by the page and the PDF)."""
+    formulas = load_formulas()
+    formula_id = request.args.get("formula_id") or (formulas[0]["id"] if formulas else None)
+    formula = get_formula_by_id(formulas, formula_id) if formula_id else None
+    allowed = allowed_location_ids(current_user())
+    locations = [l for l in load_locations_safe() if allowed is None or str(l.get("id")) in allowed]
+    defaults = (formula or {}).get("defaults") or {}
+    batch_unit = normalize_unit(request.args.get("batch_unit") or defaults.get("target_unit") or "gal")
+    batch_qty = request.args.get("batch_qty") or defaults.get("target_qty") or 100
+    location_id = request.args.get("location_id") or (str(locations[0]["id"]) if locations else None)
+    tank_id = request.args.get("tank_id") or None
+    tanks = [t for t in load_tanks() if t.get("is_active", True)]
+    rep = build_blend_instruction_report(formula, batch_qty, batch_unit, location_id, tank_id) if formula else None
+    ctx = {"formulas": formulas, "formula": formula, "locations": locations, "tanks": tanks,
+           "sel": {"formula_id": formula_id, "batch_qty": batch_qty, "batch_unit": batch_unit,
+                   "location_id": location_id, "tank_id": tank_id}}
+    return rep, ctx
 
 
 @app.route("/reports/cycle-count")
@@ -8685,7 +8947,7 @@ def report_cycle_count_pdf():
     count = request.args.get("count", "10")
     rows = build_cycle_count_sheet(location, count)
     buf = pdf_cycle_count(rows, location)
-    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name="cycle_count_sheet.pdf")
+    return _pdf_response(buf, "cycle_count_sheet.pdf")
 
 
 # -------------------------
@@ -8724,6 +8986,785 @@ def canonicalize_products_on_startup():
         save_alerts(alerts)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Transaction History + Undo
+# ---------------------------------------------------------------------------
+# Every request that moves inventory is wrapped: the stock stores are
+# snapshotted before the route runs and again after, and the exact difference
+# (bulk FIFO layers per product/location/cost, package rows, tank rows,
+# staging and blend-log records) is saved as ONE transaction record.
+#
+# Undo never deletes anything. It writes a reversing transaction linked to the
+# original, appends opposite package/tank rows, puts bulk stock back exactly
+# where it came from, and marks the original "undone" with who/when/why.
+# All files an undo touches are written together in one commit (see
+# _commit_files), so a blend's parts reverse all-or-nothing.
+# ---------------------------------------------------------------------------
+import copy
+import threading
+from contextlib import contextmanager
+from flask import g
+
+try:
+    import fcntl
+except ImportError:  # Windows dev machines: thread lock only
+    fcntl = None
+
+TRANSACTIONS_PATH = os.path.join(DATA_DIR, "transactions.json")
+COMMIT_JOURNAL_PATH = os.path.join(DATA_DIR, ".commit_journal.json")
+INVENTORY_LOCK_PATH = os.path.join(DATA_DIR, ".inventory.lock")
+
+TXN_EPS = 1e-6
+TXN_ACTIONS = ["Receive", "Remove", "Move", "Repackage", "Blend", "Staging", "Staging Release",
+               "Staging Cancel", "Undo"]
+
+# Routes that move stock (POST only). Anything they change is logged.
+TXN_ENDPOINTS = {
+    "inventory_adjust_page", "inventory_add_page", "inventory_receive_page", "receive_inventory",
+    "blend_build", "blend_execute_formula", "blend_execute_at_location",
+    "staging_create_route", "staging_release_flow", "staging_void_route",
+    "staging_picked_up", "staging_cancel",
+}
+
+
+class UndoError(Exception):
+    pass
+
+
+def load_transactions():
+    return load_json(TRANSACTIONS_PATH, [])
+
+
+def next_transaction_id(txns):
+    n = 0
+    for t in txns:
+        tid = str(t.get("id", ""))
+        if tid.startswith("TXN-") and tid[4:].isdigit():
+            n = max(n, int(tid[4:]))
+    return f"TXN-{n + 1:06d}"
+
+
+def user_can_undo(user) -> bool:
+    """Per-user switch, on unless an admin turned it off."""
+    return bool(user) and normalize_user(user).get("can_undo", True) is not False
+
+
+# ---- One lock for every stock write (threads + gunicorn workers) ----
+_inventory_thread_lock = threading.Lock()
+
+
+def _inventory_lock_acquire():
+    _inventory_thread_lock.acquire()
+    fh = None
+    if fcntl:
+        try:
+            _ensure_dir_for(INVENTORY_LOCK_PATH)
+            fh = open(INVENTORY_LOCK_PATH, "a")
+            fcntl.flock(fh, fcntl.LOCK_EX)
+        except Exception:
+            fh = None
+    return fh
+
+
+def _inventory_lock_release(fh):
+    try:
+        if fh is not None:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+            fh.close()
+    finally:
+        _inventory_thread_lock.release()
+
+
+@contextmanager
+def inventory_lock():
+    fh = _inventory_lock_acquire()
+    try:
+        yield
+    finally:
+        _inventory_lock_release(fh)
+
+
+# ---- All-or-nothing multi-file write ----
+def _commit_files(files: dict):
+    """
+    Write several JSON files as one unit. Every new version is written and
+    fsynced to a temp file first; then a journal listing them is saved; then
+    each temp file is swapped in. If the app dies partway through the swaps,
+    _recover_commit_journal() finishes them on the next start, so the files
+    never end up half-updated.
+    """
+    staged = {}
+    try:
+        for path, data in files.items():
+            _ensure_dir_for(path)
+            fd, tmp = tempfile.mkstemp(prefix=".commit_", suffix=".json", dir=os.path.dirname(path))
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            staged[path] = tmp
+    except Exception:
+        for tmp in staged.values():
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
+    _atomic_write_json(COMMIT_JOURNAL_PATH, staged)
+    _recover_commit_journal()
+
+
+def _recover_commit_journal():
+    if not os.path.exists(COMMIT_JOURNAL_PATH):
+        return
+    try:
+        with open(COMMIT_JOURNAL_PATH, "r", encoding="utf-8") as f:
+            staged = json.load(f)
+    except Exception:
+        staged = {}
+    for path, tmp in (staged or {}).items():
+        if os.path.exists(tmp):
+            os.replace(tmp, path)
+    os.remove(COMMIT_JOURNAL_PATH)
+
+
+_recover_commit_journal()
+
+
+def _build_ledger_entry(entries: list, event_type: str, payload: dict) -> dict:
+    prev_hash = entries[-1]["entry_hash"] if entries else GENESIS_HASH
+    entry_id = f"LEDG-{len(entries) + 1:07d}"
+    timestamp = now_central_iso()
+    entry = {"entry_id": entry_id, "prev_hash": prev_hash, "event_type": event_type,
+             "timestamp": timestamp, "payload": payload}
+    entry["entry_hash"] = _hash_entry(prev_hash, entry_id, event_type, timestamp, payload)
+    return entry
+
+
+# ---- Snapshot + diff ----
+def _layer_key(layer):
+    return (str(layer.get("location") or ""), round(float(layer.get("unit_cost") or 0.0), 4),
+            str(layer.get("datetime") or ""))
+
+
+def _txn_snapshot():
+    products = copy.deepcopy(load_products())
+    migrate_products_to_layers(products)  # same normalizing the routes do, so it never shows as a change
+    prods = {}
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        layers = {}
+        for l in p.get("layers") or []:
+            k = _layer_key(l)
+            layers[k] = layers.get(k, 0.0) + float(l.get("qty") or 0.0)
+        prods[str(p.get("id"))] = {
+            "name": p.get("name"), "default_unit": normalize_unit(p.get("default_unit")),
+            "weight": p.get("weight"), "package_size_gal": p.get("package_size_gal"), "layers": layers,
+        }
+    return {
+        "products": prods,
+        "pki": {str(r.get("id")): r for r in load_package_inventory()},
+        "tank_ledger": {str(r.get("id")): r for r in load_tank_ledger()},
+        "staging": {str(r.get("id")): r for r in load_staging()},
+        "blends": {str(r.get("id")): r for r in load_blends()},
+    }
+
+
+def _txn_diff(before, after):
+    bulk = []
+    for pid in sorted(set(before["products"]) | set(after["products"])):
+        b = before["products"].get(pid, {}).get("layers", {})
+        a = after["products"].get(pid, {}).get("layers", {})
+        info = after["products"].get(pid) or before["products"].get(pid)
+        for key in set(a) | set(b):
+            d = a.get(key, 0.0) - b.get(key, 0.0)
+            if abs(d) > TXN_EPS:
+                bulk.append({"product_id": pid, "product_name": info["name"], "unit": info["default_unit"],
+                             "location": key[0], "unit_cost": key[1], "datetime": key[2], "qty": round(d, 4)})
+    bulk.sort(key=lambda e: (e["qty"] > 0, e["product_name"] or "", e["location"]))
+
+    staging = []
+    for sid, rec in after["staging"].items():
+        old = before["staging"].get(sid)
+        if old is None:
+            staging.append({"id": sid, "new": True, "status_after": rec.get("status"),
+                            "product_id": rec.get("product_id"), "product_name": rec.get("product_name"),
+                            "location_name": rec.get("location_name"), "qty_default": rec.get("qty_default"),
+                            "default_unit": rec.get("default_unit")})
+            continue
+        changed = sorted(k for k in set(rec) | set(old) if rec.get(k) != old.get(k) or (k in rec) != (k in old))
+        if changed:
+            staging.append({"id": sid, "new": False,
+                            "before": {k: old[k] for k in changed if k in old},
+                            "after": {k: rec[k] for k in changed if k in rec},
+                            "product_id": rec.get("product_id"), "product_name": rec.get("product_name"),
+                            "location_name": rec.get("location_name"), "qty_default": rec.get("qty_default"),
+                            "default_unit": rec.get("default_unit")})
+
+    return {
+        "bulk": bulk,
+        "pki": [r for k, r in after["pki"].items() if k not in before["pki"]],
+        "tank": [r for k, r in after["tank_ledger"].items() if k not in before["tank_ledger"]],
+        "staging": staging,
+        "blends": [{"id": k, "number": r.get("number"), "blend": r.get("blend")}
+                   for k, r in after["blends"].items() if k not in before["blends"]],
+        "new_products": [pid for pid in after["products"] if pid not in before["products"]],
+    }
+
+
+def _txn_has_changes(eff):
+    return any(eff.get(k) for k in ("bulk", "pki", "tank", "staging", "blends"))
+
+
+def _qty_gal_lb(info, qty):
+    """(gallons, pounds) for a qty in the product's own unit; None where it can't be worked out."""
+    unit = normalize_unit((info or {}).get("default_unit") or (info or {}).get("unit"))
+    w = _safe_float((info or {}).get("weight"), 0.0)
+    ps = _safe_float((info or {}).get("package_size_gal"), 0.0)
+    gal = lb = None
+    if unit == "gal":
+        gal = qty
+    elif unit == "lb":
+        lb = qty
+        gal = qty / w if w > 0 else None
+    elif unit == "unit" and ps > 0:
+        gal = qty * ps
+    if lb is None and gal is not None and w > 0:
+        lb = gal * w
+    return gal, lb
+
+
+def _tank_location_names():
+    locs = {str(l.get("id")): l.get("name") for l in load_locations_safe()}
+    return {str(t.get("id")): (locs.get(str(t.get("location_id"))), t.get("name")) for t in load_tanks()}
+
+
+def _txn_summary(action, eff, prods):
+    """Row fields shown in Transaction History (worked out once, when recorded)."""
+    tank_locs = _tank_location_names()
+    locations = []
+
+    def add_loc(name):
+        if name and name not in locations:
+            locations.append(name)
+
+    for e in eff["bulk"]:
+        add_loc(e["location"])
+    for r in eff["pki"]:
+        add_loc(r.get("location_name"))
+    for r in eff["tank"]:
+        add_loc(tank_locs.get(str(r.get("tank_id")), (None, None))[0])
+    for s in eff["staging"]:
+        add_loc(s.get("location_name"))
+
+    pos, neg = {}, {}
+    for e in eff["bulk"]:
+        bucket = pos if e["qty"] > 0 else neg
+        bucket[e["product_id"]] = bucket.get(e["product_id"], 0.0) + abs(e["qty"])
+    if action in ("Remove", "Staging"):
+        primary = neg or pos
+    else:
+        primary = pos or neg
+
+    names, gal_total, lb_total, product_ids = [], 0.0, 0.0, []
+    gal_ok = lb_ok = bool(primary)
+    for pid, q in primary.items():
+        info = prods.get(pid) or {}
+        names.append(info.get("name") or pid)
+        product_ids.append(pid)
+        gal, lb = _qty_gal_lb(info, q)
+        if gal is None:
+            gal_ok = False
+        else:
+            gal_total += gal
+        if lb is None:
+            lb_ok = False
+        else:
+            lb_total += lb
+
+    if not primary and eff["staging"]:  # e.g. Staging Release: no stock moves, just the order
+        s = eff["staging"][0]
+        info = prods.get(str(s.get("product_id"))) or {"default_unit": s.get("default_unit")}
+        names = [s.get("product_name") or s.get("product_id")]
+        product_ids = [str(s.get("product_id"))]
+        gal, lb = _qty_gal_lb(info, _safe_float(s.get("qty_default"), 0.0))
+        gal_ok, lb_ok = gal is not None, lb is not None
+        gal_total, lb_total = gal or 0.0, lb or 0.0
+
+    for r in eff["pki"]:  # products that only changed as packages
+        pid = str(r.get("product_id"))
+        if pid not in product_ids:
+            product_ids.append(pid)
+            if not primary:
+                names.append((prods.get(pid) or {}).get("name") or pid)
+
+    pkg_types = []
+    pkg_count = 0.0
+    for r in eff["pki"]:
+        if r.get("package_name") and r.get("package_name") not in pkg_types:
+            pkg_types.append(r.get("package_name"))
+        pkg_count += abs(_safe_float(r.get("quantity"), 0.0))
+
+    loc_display = " → ".join(locations) if action == "Move" and len(locations) == 2 else ", ".join(locations)
+    return {
+        "location": loc_display, "locations": locations,
+        "product": ", ".join(n for n in names if n), "product_ids": product_ids,
+        "qty_gal": round(gal_total, 4) if gal_ok else None,
+        "qty_lb": round(lb_total, 4) if lb_ok else None,
+        "package_type": ", ".join(pkg_types), "package_count": round(pkg_count, 4) if pkg_count else None,
+    }
+
+
+def _txn_action_label(endpoint, form):
+    if endpoint in ("inventory_adjust_page", "inventory_add_page"):
+        a = (form.get("action") or "add").strip().lower()
+        if a == "remove":
+            staged = (form.get("stage") or "").lower() in ("1", "true", "yes", "on")
+            return "Staging" if staged else "Remove"
+        return {"add": "Receive", "move": "Move", "repackage": "Repackage"}.get(a, "Receive")
+    if endpoint in ("inventory_receive_page", "receive_inventory"):
+        return "Receive"
+    if endpoint.startswith("blend_"):
+        return "Blend"
+    if endpoint == "staging_create_route":
+        return "Staging"
+    if endpoint in ("staging_release_flow", "staging_picked_up"):
+        return "Staging Release"
+    return "Staging Cancel"
+
+
+@app.before_request
+def _txn_begin():
+    # Registered after the login/permission/CSRF/location checks, so it only
+    # runs for requests that are allowed through.
+    if request.method != "POST" or request.endpoint not in TXN_ENDPOINTS:
+        return None
+    user = current_user()
+    if not user:
+        return None
+    g._txn_lock = _inventory_lock_acquire()
+    g._txn_active = True
+    try:
+        g._txn = {
+            "before": _txn_snapshot(),
+            "action": _txn_action_label(request.endpoint, request.get_json(silent=True) or request.form),
+            "user": user.get("username"), "user_id": user.get("id"),
+        }
+    except Exception:
+        g._txn = None
+        app.logger.exception("Transaction snapshot failed")
+    return None
+
+
+@app.teardown_request
+def _txn_end(exc):
+    if not getattr(g, "_txn_active", False):
+        return
+    try:
+        t = getattr(g, "_txn", None)
+        if t:
+            after = _txn_snapshot()
+            eff = _txn_diff(t["before"], after)
+            if _txn_has_changes(eff):
+                txns = load_transactions()
+                rec = {
+                    "id": next_transaction_id(txns), "ts": now_central_iso(),
+                    "user": t["user"], "user_id": t["user_id"], "action": t["action"],
+                    "status": "completed", "summary": _txn_summary(t["action"], eff, after["products"]),
+                    "effects": eff, "undo": None, "reverses": None,
+                }
+                txns.append(rec)
+                save_json(TRANSACTIONS_PATH, txns)
+                append_ledger_entry("inventory_transaction", {
+                    "transaction_id": rec["id"], "action": rec["action"], "by": rec["user"],
+                    "location": rec["summary"]["location"], "product": rec["summary"]["product"],
+                    "qty_gal": rec["summary"]["qty_gal"],
+                })
+    except Exception:
+        app.logger.exception("Recording the transaction failed")
+    finally:
+        g._txn_active = False
+        _inventory_lock_release(getattr(g, "_txn_lock", None))
+
+
+# ---- Undo ----
+def _bulk_on_hand(prod, location):
+    key = (location or "").strip().lower()
+    return sum(float(l["qty"]) for l in prod["layers"] if (l.get("location") or "").strip().lower() == key)
+
+
+def _bulk_put_back(prod, e):
+    """Return stock that the original transaction took out, at its original location and cost."""
+    key = (e["location"], e["unit_cost"], e["datetime"])
+    qty = -e["qty"]
+    for l in prod["layers"]:
+        if _layer_key(l) == key:
+            l["qty"] = round(float(l["qty"]) + qty, 4)
+            return
+    new = {"qty": round(qty, 4), "unit": normalize_unit(prod.get("default_unit")), "unit_cost": e["unit_cost"],
+           "datetime": e["datetime"], "location": e["location"]}
+    # keep FIFO order: in front of the first layer that's newer
+    idx = next((i for i, l in enumerate(prod["layers"]) if str(l.get("datetime") or "") > e["datetime"]),
+               len(prod["layers"]))
+    prod["layers"].insert(idx, new)
+
+
+def _bulk_take_out(prod, e):
+    """Remove stock the original transaction added: that exact layer first, then oldest at the same location."""
+    need = e["qty"]
+    key = (e["location"], e["unit_cost"], e["datetime"])
+    loc = e["location"].strip().lower()
+    order = [l for l in prod["layers"] if _layer_key(l) == key] + \
+            [l for l in prod["layers"] if _layer_key(l) != key and (l.get("location") or "").strip().lower() == loc]
+    for l in order:
+        if need <= TXN_EPS:
+            break
+        take = min(float(l["qty"]), need)
+        l["qty"] = float(l["qty"]) - take
+        need -= take
+    prod["layers"] = [l for l in prod["layers"] if float(l["qty"]) > 1e-9]
+
+
+def _pki_count(records, product_id, package_id, location_id):
+    return sum(_safe_float(r.get("quantity"), 0.0) for r in records
+               if str(r.get("product_id")) == str(product_id) and str(r.get("package_id")) == str(package_id)
+               and str(r.get("location_id")) == str(location_id))
+
+
+def _fmt_qty(q, unit):
+    return f"{q:,.4f}".rstrip("0").rstrip(".") + f" {str(unit or '').upper()}"
+
+
+def undo_preview(txn, products_by_id=None, pki=None, tank_rows=None, tanks=None):
+    """The exact stock changes an undo would make, as rows for the confirmation pop-up."""
+    products_by_id = products_by_id if products_by_id is not None else {str(p.get("id")): p for p in load_products()}
+    pki = pki if pki is not None else load_package_inventory()
+    tank_rows = tank_rows if tank_rows is not None else load_tank_ledger()
+    tanks = tanks if tanks is not None else load_tanks()
+    eff = txn.get("effects") or {}
+    rows = []
+
+    # bulk, netted per product + location
+    net = {}
+    for e in eff.get("bulk", []):
+        k = (e["product_id"], e["location"])
+        net[k] = net.get(k, 0.0) - e["qty"]
+    for (pid, loc), change in net.items():
+        if abs(change) <= TXN_EPS:
+            continue
+        p = products_by_id.get(pid)
+        unit = normalize_unit((p or {}).get("default_unit"))
+        now = _bulk_on_hand({"layers": (p or {}).get("layers") or []}, loc) if p else 0.0
+        rows.append({"kind": "Bulk", "item": (p or {}).get("name") or pid, "location": loc,
+                     "change": ("+" if change > 0 else "−") + _fmt_qty(abs(change), unit),
+                     "now": _fmt_qty(now, unit), "after": _fmt_qty(now + change, unit),
+                     "problem": now + change < -TXN_EPS})
+
+    for r in eff.get("pki", []):
+        q = -_safe_float(r.get("quantity"), 0.0)
+        now = _pki_count(pki, r.get("product_id"), r.get("package_id"), r.get("location_id"))
+        name = (products_by_id.get(str(r.get("product_id"))) or {}).get("name") or r.get("product_id")
+        rows.append({"kind": "Packages", "item": f"{name} — {r.get('package_name')}",
+                     "location": r.get("location_name"), "change": f"{'+' if q > 0 else '−'}{abs(q):g}",
+                     "now": f"{now:g}", "after": f"{now + q:g}", "problem": now + q < -TXN_EPS})
+
+    tank_names = _tank_location_names()
+    for r in eff.get("tank", []):
+        d = -_safe_float(r.get("delta_gal"), 0.0)
+        tid = str(r.get("tank_id"))
+        now = get_tank_fill_gal(tank_rows, tid)
+        t = get_tank_by_id(tanks, tid) or {}
+        cap = _safe_float(t.get("capacity_gal"), 0.0)
+        loc, tname = tank_names.get(tid, (None, tid))
+        rows.append({"kind": "Tank", "item": tname or tid, "location": loc,
+                     "change": f"{'+' if d > 0 else '−'}{abs(d):g} GAL", "now": f"{now:g} GAL",
+                     "after": f"{now + d:g} GAL",
+                     "problem": now + d < -TXN_EPS or (cap > 0 and now + d > cap + TXN_EPS)})
+
+    for s in eff.get("staging", []):
+        if s.get("new"):
+            rows.append({"kind": "Staging", "item": s.get("product_name"), "location": s.get("location_name"),
+                         "change": "Order marked undone", "now": s.get("status_after"), "after": "undone",
+                         "problem": False})
+        else:
+            rows.append({"kind": "Staging", "item": s.get("product_name"), "location": s.get("location_name"),
+                         "change": "Order set back", "now": (s.get("after") or {}).get("status", "—"),
+                         "after": (s.get("before") or {}).get("status", "—"), "problem": False})
+    for b in eff.get("blends", []):
+        rows.append({"kind": "Blend log", "item": f"Blend #{b.get('number')} {b.get('blend') or ''}".strip(),
+                     "location": "", "change": "Marked undone", "now": "", "after": "", "problem": False})
+    return rows
+
+
+def undo_transaction(txn_id: str, user: dict, reason: str | None):
+    """Reverse one transaction. Raises UndoError (and changes nothing) if it can't."""
+    txns = load_transactions()
+    txn = next((t for t in txns if t.get("id") == txn_id), None)
+    if not txn:
+        raise UndoError("That transaction wasn't found.")
+    if txn.get("reverses"):
+        raise UndoError("This entry is itself an undo and can't be undone.")
+    if txn.get("status") == "undone":
+        raise UndoError(f"{txn_id} was already undone.")
+    for loc in (txn.get("summary") or {}).get("locations") or []:
+        if not user_can_use_location(user, loc_name=loc):
+            raise UndoError(f"You aren't assigned to {loc}.")
+
+    eff = txn.get("effects") or {}
+    errors = []
+    now = now_central_iso()
+    who = user.get("username")
+
+    # 1) bulk stock: put back what was taken, then take out what was added
+    products = load_products()
+    migrate_products_to_layers(products)
+    by_id = {str(p.get("id")): p for p in products}
+    touched = set()
+    for e in [e for e in eff.get("bulk", []) if e["qty"] < 0]:
+        prod = by_id.get(e["product_id"])
+        if not prod:
+            errors.append(f"{e['product_name']} no longer exists.")
+            continue
+        _bulk_put_back(prod, e)
+        touched.add(e["product_id"])
+    for e in [e for e in eff.get("bulk", []) if e["qty"] > 0]:
+        prod = by_id.get(e["product_id"])
+        if not prod:
+            errors.append(f"{e['product_name']} no longer exists.")
+            continue
+        have = _bulk_on_hand(prod, e["location"])
+        if have + TXN_EPS < e["qty"]:
+            errors.append(f"{prod.get('name')} at {e['location']}: only {_fmt_qty(have, e['unit'])} on hand, "
+                          f"undo needs to remove {_fmt_qty(e['qty'], e['unit'])} (stock would go negative).")
+            continue
+        _bulk_take_out(prod, e)
+        touched.add(e["product_id"])
+    for pid in touched:
+        _sync_product_qty_and_avg_cost_from_layers(by_id[pid])
+        by_id[pid]["last_updated"] = now
+
+    # 2) package counts: opposite rows
+    pki = load_package_inventory()
+    pki_keys = set()
+    for r in eff.get("pki", []):
+        q = -_safe_float(r.get("quantity"), 0.0)
+        vol = _safe_float(r.get("volume_per"), 0.0)
+        pki.append({**r, "id": generate_next_pki_id(pki), "quantity": q, "total_volume": q * vol,
+                    "received_at": now if q > 0 else None, "removed_at": now if q < 0 else None,
+                    "type": "undo", "notes": f"Undo of {txn_id}"})
+        pki_keys.add((r.get("product_id"), r.get("package_id"), r.get("location_id"), r.get("package_name")))
+    for pid, pkg, lid, pname in pki_keys:
+        left = _pki_count(pki, pid, pkg, lid)
+        if left < -TXN_EPS:
+            name = (by_id.get(str(pid)) or {}).get("name") or pid
+            errors.append(f"{name} {pname}: package count would go negative ({left:g}).")
+
+    # 3) tanks: opposite rows, then check fill/capacity/which product the tank holds
+    tank_rows = load_tank_ledger()
+    tanks = load_tanks()
+    tank_in = {}
+    for r in eff.get("tank", []):
+        d = -_safe_float(r.get("delta_gal"), 0.0)
+        tank_rows.append({"id": generate_next_tx_id(tank_rows), "ts": now, "tank_id": str(r.get("tank_id")),
+                          "product_id": r.get("product_id"), "delta_gal": d, "source": "undo",
+                          "ref": txn_id, "notes": f"Undo of {txn_id}"})
+        if d > 0:
+            tank_in[str(r.get("tank_id"))] = r.get("product_id")
+    for tid in {str(r.get("tank_id")) for r in eff.get("tank", [])}:
+        t = get_tank_by_id(tanks, tid)
+        fill = get_tank_fill_gal(tank_rows, tid)
+        name = (t or {}).get("name") or tid
+        if fill < -TXN_EPS:
+            errors.append(f"Tank {name} would go below empty ({fill:g} gal).")
+        cap = _safe_float((t or {}).get("capacity_gal"), 0.0)
+        if t and cap > 0 and fill > cap + TXN_EPS:
+            errors.append(f"Tank {name} would be over capacity ({fill:g} of {cap:g} gal).")
+        if t and tid in tank_in:
+            holds = t.get("assigned_product_id")
+            if holds and str(holds) != str(tank_in[tid]):
+                errors.append(f"Tank {name} now holds a different product.")
+        if t:
+            if fill <= 1e-9:
+                t["assigned_product_id"] = None
+            elif not t.get("assigned_product_id") and tid in tank_in:
+                t["assigned_product_id"] = tank_in[tid]
+
+    # 4) staging orders: only if nothing has changed them since
+    staging = load_staging()
+    st_by_id = {str(r.get("id")): r for r in staging}
+    for s in eff.get("staging", []):
+        rec = st_by_id.get(str(s["id"]))
+        label = s.get("product_name") or "staging order"
+        if not rec:
+            errors.append(f"The staging order for {label} no longer exists.")
+            continue
+        if s.get("new"):
+            if rec.get("status") != s.get("status_after"):
+                errors.append(f"The staging order for {label} is now '{rec.get('status')}'. Undo that change first.")
+                continue
+            rec.update({"status": "undone", "undone_at": now, "undone_by": who, "undone_txn": txn_id})
+        else:
+            after, before = s.get("after") or {}, s.get("before") or {}
+            keys = set(after) | set(before)
+            if any(rec.get(k) != after.get(k) or (k in rec) != (k in after) for k in keys):
+                errors.append(f"The staging order for {label} has changed since. Undo the later change first.")
+                continue
+            for k in keys:
+                if k in before:
+                    rec[k] = before[k]
+                else:
+                    rec.pop(k, None)
+
+    # 5) blend log entries
+    blends = load_blends()
+    bl_by_id = {str(b.get("id")): b for b in blends}
+    for b in eff.get("blends", []):
+        rec = bl_by_id.get(str(b["id"]))
+        if rec:
+            rec.update({"status": "undone", "undone_at": now, "undone_by": who, "undo_reason": reason,
+                        "undone_txn": txn_id})
+
+    if errors:
+        raise UndoError("Can't undo " + txn_id + ": " + " ".join(errors))
+
+    # 6) the reversing entry + mark the original
+    rev_id = next_transaction_id(txns)
+    rev_eff = {
+        "bulk": [{**e, "qty": -e["qty"]} for e in eff.get("bulk", [])],
+        "pki": [r for r in pki if r.get("type") == "undo" and r.get("notes") == f"Undo of {txn_id}"],
+        "tank": [r for r in tank_rows if r.get("source") == "undo" and r.get("ref") == txn_id],
+        "staging": eff.get("staging", []), "blends": eff.get("blends", []), "new_products": [],
+    }
+    txns.append({
+        "id": rev_id, "ts": now, "user": who, "user_id": user.get("id"), "action": "Undo",
+        "status": "reversal", "summary": dict(txn.get("summary") or {}), "effects": rev_eff,
+        "undo": None, "reverses": txn_id, "reverses_action": txn.get("action"), "reason": reason,
+    })
+    txn["status"] = "undone"
+    txn["undo"] = {"by": who, "at": now, "reason": reason, "reversal_id": rev_id}
+
+    ledger = load_ledger()
+    ledger.append(_build_ledger_entry(ledger, "inventory_undo", {
+        "transaction_id": txn_id, "reversal_id": rev_id, "action": txn.get("action"),
+        "by": who, "reason": reason,
+    }))
+
+    # 7) everything lands together or not at all
+    files = {TRANSACTIONS_PATH: txns, EVENT_LEDGER_PATH: ledger}
+    if touched:
+        files[DATA_PATH] = products
+    if eff.get("pki"):
+        files[PACKAGE_INVENTORY_PATH] = pki
+    if eff.get("tank"):
+        files[TANK_LEDGER_PATH] = tank_rows
+        files[TANKS_PATH] = tanks
+    if eff.get("staging"):
+        files[STAGING_PATH] = staging
+    if eff.get("blends"):
+        files[BLENDS_PATH] = blends
+    _commit_files(files)
+    return rev_id
+
+
+# ---- Pages ----
+def _txn_dt(ts):
+    try:
+        d = datetime.fromisoformat(str(ts))
+        return d.strftime("%b %d, %Y"), d.strftime("%I:%M %p").lstrip("0")
+    except Exception:
+        return str(ts or "")[:10], str(ts or "")[11:16]
+
+
+@app.route("/transactions")
+def transactions_page():
+    user = current_user()
+    txns = load_transactions()
+    allowed = allowed_location_ids(user)
+    if allowed is not None:
+        txns = [t for t in txns
+                if all(user_can_use_location(user, loc_name=l) for l in (t.get("summary") or {}).get("locations") or [])]
+
+    f = {k: (request.args.get(k) or "").strip() for k in ("date_from", "date_to", "user", "location", "action", "product")}
+    users = sorted({t.get("user") for t in txns if t.get("user")})
+    locations = sorted({l for t in txns for l in (t.get("summary") or {}).get("locations") or []})
+    products_by_id = {str(p.get("id")): p for p in load_products()}
+    product_choices = sorted({pid for t in txns for pid in (t.get("summary") or {}).get("product_ids") or []},
+                             key=lambda pid: ((products_by_id.get(pid) or {}).get("name") or pid).lower())
+    product_choices = [(pid, (products_by_id.get(pid) or {}).get("name") or pid) for pid in product_choices]
+
+    def keep(t):
+        s = t.get("summary") or {}
+        day = str(t.get("ts") or "")[:10]
+        if f["date_from"] and day < f["date_from"]:
+            return False
+        if f["date_to"] and day > f["date_to"]:
+            return False
+        if f["user"] and t.get("user") != f["user"]:
+            return False
+        if f["location"] and f["location"] not in (s.get("locations") or []):
+            return False
+        if f["action"] and t.get("action") != f["action"]:
+            return False
+        if f["product"] and f["product"] not in (s.get("product_ids") or []):
+            return False
+        return True
+
+    rows = [t for t in txns if keep(t)]
+    rows.sort(key=lambda t: t.get("id") or "", reverse=True)
+    total = len(rows)
+    rows = rows[:500]
+
+    may_undo = user_can_undo(user)
+    pki, tank_rows, tanks = load_package_inventory(), load_tank_ledger(), load_tanks()
+    view = []
+    for t in rows:
+        d, tm = _txn_dt(t.get("ts"))
+        can_undo_row = may_undo and t.get("status") == "completed" and not t.get("reverses")
+        view.append({
+            "t": t, "date": d, "time": tm, "s": t.get("summary") or {},
+            "can_undo": can_undo_row,
+            "preview": undo_preview(t, products_by_id, pki, tank_rows, tanks) if can_undo_row else None,
+        })
+    return render_template("transactions.html", app_title=APP_TITLE, rows=view, total=total, f=f,
+                           users=users, locations=locations, products=product_choices, actions=TXN_ACTIONS)
+
+
+@app.post("/transactions/<txn_id>/undo")
+def transaction_undo(txn_id):
+    user = current_user()
+    back = request.form.get("next") or ""
+    if not back.startswith("/transactions"):
+        back = url_for("transactions_page")
+    if not user_can_undo(user):
+        return render_template("no_access.html", message="You don't have permission to undo transactions."), 403
+    reason = (request.form.get("reason") or "").strip()[:500] or None
+    try:
+        with inventory_lock():
+            rev_id = undo_transaction(txn_id, user, reason)
+    except UndoError as e:
+        flash(str(e), "danger")
+        return redirect(back)
+    flash(f"{txn_id} was undone. The reversal is recorded as {rev_id}.", "success")
+    return redirect(back)
+
+
+@app.post("/admin/users/<user_id>/can-undo")
+def admin_user_can_undo(user_id):
+    me = current_user()
+    users = load_users()
+    u = next((x for x in users if x.get("id") == user_id), None)
+    if not u:
+        flash("User not found.", "danger")
+        return redirect(url_for("admin_page"))
+    u["can_undo"] = request.form.get("can_undo") == "1"
+    save_users(users)
+    append_ledger_entry("user_can_undo_changed", {"username": u.get("username"), "can_undo": u["can_undo"],
+                                                  "by": me.get("username")})
+    flash(f"{user_display_name(u)} {'can' if u['can_undo'] else 'can no longer'} undo transactions.", "success")
+    return redirect(url_for("admin_page"))
 
 
 # -------------------------

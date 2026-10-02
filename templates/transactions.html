@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .txn-table th, .txn-table td { white-space: nowrap; font-size: .9rem; }
+  .txn-table td.wrap { white-space: normal; min-width: 160px; }
+  .txn-filters .form-label { font-size: .8rem; margin-bottom: 2px; color: #64748b; }
+  .undo-changes td, .undo-changes th { font-size: .85rem; }
+  .undo-changes tr.problem td { color: #b91c1c; font-weight: 600; }
+  /* above the sticky app header */
+  #undoModal { z-index: 3000; }
+  .modal-backdrop { z-index: 2990; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Transaction History</h4>
+  <span class="text-muted small">{{ total }} transaction{{ '' if total == 1 else 's' }}{% if total > rows|length %} · showing newest {{ rows|length }}{% endif %}</span>
+</div>
+
+<form method="get" class="card card-body shadow-sm mb-3 txn-filters">
+  {% if request.args.get('embed') %}<input type="hidden" name="embed" value="1">{% endif %}
+  <div class="row g-2 align-items-end">
+    <div class="col-6 col-md-2">
+      <label class="form-label" for="fFrom">From</label>
+      <input type="date" id="fFrom" name="date_from" value="{{ f.date_from }}" class="form-control form-control-sm">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label" for="fTo">To</label>
+      <input type="date" id="fTo" name="date_to" value="{{ f.date_to }}" class="form-control form-control-sm">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label" for="fUser">User</label>
+      <select id="fUser" name="user" class="form-select form-select-sm">
+        <option value="">All users</option>
+        {% for u in users %}<option value="{{ u }}" {% if f.user == u %}selected{% endif %}>{{ u }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label" for="fLoc">Location</label>
+      <select id="fLoc" name="location" class="form-select form-select-sm">
+        <option value="">All locations</option>
+        {% for l in locations %}<option value="{{ l }}" {% if f.location == l %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-1">
+      <label class="form-label" for="fAction">Action</label>
+      <select id="fAction" name="action" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for a in actions %}<option value="{{ a }}" {% if f.action == a %}selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label" for="fProduct">Product</label>
+      <select id="fProduct" name="product" class="form-select form-select-sm">
+        <option value="">All products</option>
+        {% for pid, name in products %}<option value="{{ pid }}" {% if f.product == pid %}selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-1 d-flex gap-1">
+      <button type="submit" class="btn btn-primary btn-sm flex-fill">Filter</button>
+      <a href="{{ url_for('transactions_page', embed=request.args.get('embed')) }}" class="btn btn-outline-secondary btn-sm" title="Clear filters">✕</a>
+    </div>
+  </div>
+</form>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0 txn-table">
+      <thead class="table-light">
+        <tr>
+          <th>User</th><th>Date</th><th>Time</th><th>Location</th><th>Action</th><th>Product</th>
+          <th class="text-end">Qty (gal)</th><th class="text-end">Qty (lbs)</th>
+          <th>Package type</th><th class="text-end">Package count</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% set t = r.t %}{% set s = r.s %}
+        <tr id="{{ t.id }}">
+          <td>{{ t.user or '—' }}</td>
+          <td>{{ r.date }}</td>
+          <td>{{ r.time }}</td>
+          <td class="wrap">{{ s.location or '—' }}</td>
+          <td>{{ t.action }}{% if t.reverses %} <span class="text-muted small">({{ t.reverses_action }})</span>{% endif %}</td>
+          <td class="wrap">{{ s.product or '—' }}</td>
+          <td class="text-end">{{ '{:,.2f}'.format(s.qty_gal) if s.qty_gal is not none else '—' }}</td>
+          <td class="text-end">{{ '{:,.2f}'.format(s.qty_lb) if s.qty_lb is not none else '—' }}</td>
+          <td>{{ s.package_type or '—' }}</td>
+          <td class="text-end">{{ '{:g}'.format(s.package_count) if s.package_count else '—' }}</td>
+          <td>
+            {% if t.status == 'undone' %}
+              <span class="badge bg-secondary" title="Undone by {{ t.undo.by }} on {{ t.undo.at|datetimeformat }}{% if t.undo.reason %} — {{ t.undo.reason }}{% endif %} ({{ t.undo.reversal_id }})">Undone</span>
+            {% elif t.status == 'reversal' %}
+              <span class="badge bg-info text-dark" title="{{ t.reason or '' }}">Reverses {{ t.reverses }}</span>
+            {% else %}
+              <span class="badge bg-success">Completed</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if r.can_undo %}
+            <button type="button" class="btn btn-outline-danger btn-sm js-undo"
+                    data-txn='{{ {"id": t.id, "action": t.action, "user": t.user, "date": r.date, "time": r.time,
+                                  "location": s.location, "product": s.product, "rows": r.preview}|tojson|forceescape }}'>Undo</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="12" class="text-center text-muted py-4">No transactions match these filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Undo confirmation -->
+<div class="modal fade" id="undoModal" tabindex="-1" aria-labelledby="undoTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <form class="modal-content" method="POST" id="undoForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ request.full_path }}">
+      <div class="modal-header">
+        <h5 class="modal-title" id="undoTitle">Undo transaction</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3" id="undoSummary"></div>
+        <h6 class="mb-2">Stock changes this undo will make</h6>
+        <div class="table-responsive mb-2">
+          <table class="table table-sm undo-changes mb-0">
+            <thead class="table-light"><tr><th>Type</th><th>Item</th><th>Location</th><th>Change</th><th>Now</th><th>After undo</th></tr></thead>
+            <tbody id="undoRows"></tbody>
+          </table>
+        </div>
+        <div class="alert alert-danger py-2 d-none" id="undoBlocked">
+          This undo would push stock below zero (or over a tank's capacity), so it can't be done right now.
+        </div>
+        <p class="text-muted small mb-3">Nothing is deleted. A reversing entry is recorded and linked to this one.</p>
+        <label class="form-label" for="undoReason">Reason <span class="text-muted">(optional)</span></label>
+        <textarea class="form-control" id="undoReason" name="reason" rows="2" maxlength="500"
+                  placeholder="Why is this being undone?"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-danger" id="undoConfirm">Confirm Undo</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const modalEl = document.getElementById('undoModal');
+    const form = document.getElementById('undoForm');
+    const rowsEl = document.getElementById('undoRows');
+    const summary = document.getElementById('undoSummary');
+    const blocked = document.getElementById('undoBlocked');
+    const confirmBtn = document.getElementById('undoConfirm');
+    const undoUrl = "{{ url_for('transaction_undo', txn_id='__ID__') }}";
+
+    function cell(text) { const td = document.createElement('td'); td.textContent = text ?? ''; return td; }
+
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('.js-undo');
+      if (!btn) return;
+      const t = JSON.parse(btn.dataset.txn);
+      form.action = undoUrl.replace('__ID__', encodeURIComponent(t.id));
+      document.getElementById('undoTitle').textContent = 'Undo ' + t.id;
+
+      summary.innerHTML = '';
+      [['Action', t.action], ['Product', t.product], ['Location', t.location],
+       ['By', t.user], ['When', t.date + ' ' + t.time]].forEach(([k, v]) => {
+        const div = document.createElement('div');
+        const b = document.createElement('strong'); b.textContent = k + ': ';
+        div.appendChild(b); div.appendChild(document.createTextNode(v || '—'));
+        summary.appendChild(div);
+      });
+
+      rowsEl.innerHTML = '';
+      let problem = false;
+      (t.rows || []).forEach(r => {
+        const tr = document.createElement('tr');
+        if (r.problem) { tr.className = 'problem'; problem = true; }
+        [r.kind, r.item, r.location, r.change, r.now, r.after].forEach(v => tr.appendChild(cell(v)));
+        rowsEl.appendChild(tr);
+      });
+      if (!(t.rows || []).length) {
+        const tr = document.createElement('tr');
+        const td = cell('No stock changes.'); td.colSpan = 6; td.className = 'text-muted';
+        tr.appendChild(td); rowsEl.appendChild(tr);
+      }
+      blocked.classList.toggle('d-none', !problem);
+      confirmBtn.disabled = problem;
+      document.getElementById('undoReason').value = '';
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    });
+
+    form.addEventListener('submit', function () {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Undoing…';
+    });
+  })();
+</script>
+{% endblock %}

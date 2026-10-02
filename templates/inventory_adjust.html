@@ -328,7 +328,7 @@
       <button type="button" class="btn tab-btn" id="tabRepackage" onclick="showTab('repackage')">Repackage</button>
       <button type="button" class="btn tab-btn" id="tabBlend" onclick="showTab('blend')">Blend</button>
       <div class="tab-spacer"></div>
-      <a class="btn tab-back" href="{{ url_for('dashboard') }}">Back</a>
+      <a class="btn tab-back" href="{{ url_for('home') }}">Back</a>
     </div>
 
     <div class="adjust-panel-wrap">
@@ -607,14 +607,48 @@
         </div>
 
 
-        <div class="af-field tank-field" id="repack_tank_id_wrap" style="display:none">
-          <label for="repack_tank_id">Filling from</label>
-          <select name="tank_id" id="repack_tank_id"></select>
-          <div class="tank-hint" style="margin-top:4px; font-size:.8rem; color:#64748b;">Where the product is coming out of. Leave it on loose stock unless you're filling from a tank.</div>
+        <!-- SOURCE: where the product is coming out of -->
+        <div class="af-field">
+          <label>Coming from *</label>
+          <div class="blend-submode" style="margin-bottom:6px;">
+            <button type="button" class="blend-submode-btn active" id="repackSrcBtnLoose"
+                    onclick="setRepackageSource('loose')">Loose stock</button>
+            <button type="button" class="blend-submode-btn" id="repackSrcBtnTank"
+                    onclick="setRepackageSource('tank')">A tank</button>
+            <button type="button" class="blend-submode-btn" id="repackSrcBtnPackage"
+                    onclick="setRepackageSource('package')">Packages on hand</button>
+          </div>
+          <input type="hidden" name="repack_source" id="repack_source" value="loose">
+          <div id="repackSourceHint" style="font-size:.8rem; color:#64748b;">
+            Unpackaged product that isn't in a tank.
+          </div>
         </div>
-        <div class="af-section-sub">
-          Packaging doesn't remove anything from the total — it just moves this amount from
-          Unpackaged into the packages below. The product's total gallons/lb stays the same.
+
+        <div class="af-field tank-field" id="repack_tank_id_wrap" style="display:none">
+          <label for="repack_tank_id">Tank you're filling from *</label>
+          <select name="tank_id" id="repack_tank_id"></select>
+        </div>
+
+        <div id="repackSourcePackageWrap" style="display:none">
+          <div class="af-qty-row">
+            <div class="af-field" style="flex:2;">
+              <label for="source_package_id">Package type you're opening *</label>
+              <select name="source_package_id" id="source_package_id" onchange="onRepackageSourcePackageChange()">
+                <option value="">Select a location and product first</option>
+              </select>
+            </div>
+            <div class="af-field qty">
+              <label for="source_package_qty"># to open *</label>
+              <input type="number" step="1" min="1" name="source_package_qty" id="source_package_qty"
+                     placeholder="e.g., 1" oninput="onRepackageSourcePackageChange()">
+            </div>
+          </div>
+          <div id="repackSourcePackageInfo" style="margin-top:-4px; margin-bottom:10px; font-size:.8rem; color:#94a3b8;"></div>
+        </div>
+
+        <div class="af-section-sub" id="repackExplain">
+          Repackaging doesn't change the product's total. It only changes what the product is sitting in.
+          If you open a package and don't refill all of it, the rest goes back to Unpackaged automatically.
         </div>
 
         <div class="af-section">
@@ -675,6 +709,24 @@
 
         <input type="hidden" name="qty" id="repackage_qty" value="">
         <input type="hidden" name="unit" id="repackage_unit_hidden" value="gal">
+
+        <div class="af-qty-row">
+          <div class="af-field qty">
+            <label for="repack_loss_qty">Loss (optional)</label>
+            <input type="text" inputmode="decimal" name="loss_qty" id="repack_loss_qty" placeholder="e.g., 0.5"
+                   oninput="refreshRepackageSummary()">
+          </div>
+          <div class="af-field unit">
+            <label>&nbsp;</label>
+            <select name="loss_unit" id="repack_loss_unit" onchange="refreshRepackageSummary()">
+              <option value="gal">GAL</option>
+              <option value="lb">LB</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:-6px; margin-bottom:12px; font-size:.8rem; color:#64748b;">
+          Spillage or residue left in the container. This is the only part that comes off the books (at FIFO cost).
+        </div>
 
         <div class="af-field">
           <label>Notes</label>
@@ -1100,10 +1152,18 @@
     const usable = tanks.filter(t => mode === 'in'
       ? (!t.product_id || t.product_id === String(productId))
       : (t.product_id === String(productId) && t.fill_gal > 0));
-    selectEl.innerHTML = '<option value="">' + (selectEl.id === 'repack_tank_id' ? 'Loose stock (not a tank)' : '— No tank —') + '</option>' +
+    const isRepack = selectEl.id === 'repack_tank_id';
+    const placeholder = isRepack
+      ? (usable.length ? 'Select a tank' : 'No tank here holds this product')
+      : '— No tank —';
+    selectEl.innerHTML = `<option value="">${placeholder}</option>` +
       usable.map(t => `<option value="${t.id}">${tankLabel(t).replace(/</g, '&lt;')}</option>`).join('');
     if (usable.some(t => t.id === keep)) selectEl.value = keep;
-    if (wrap) wrap.style.display = (productId && usable.length) ? '' : 'none';
+    if (wrap) {
+      wrap.style.display = isRepack
+        ? (window.repackSource === 'tank' ? '' : 'none')
+        : ((productId && usable.length) ? '' : 'none');
+    }
   }
 
   function wireProductTankField(formId, tankSelId, mode, locSelector, prodSelector) {
@@ -1317,6 +1377,7 @@
   function afterPkgRowChange(containerId) {
     if (containerId === 'pkg-rows-repackage' && window.repackageMode !== 'bulk') {
       recalcRepackagePackagesMode();
+      showRepackageSourceBalance();
     }
   }
 
@@ -1397,6 +1458,22 @@
     const bulkUnitSel = document.getElementById('repackage_bulk_unit');
     const pkgSel = document.getElementById('repackage_bulk_package');
 
+    // Opening packages: fill from what the opened packages hold, minus any loss
+    if (bulkInput && bulkUnitSel) {
+      const src = window.repackSource === 'package' ? getRepackageSourceInfo() : null;
+      if (src) {
+        const loss = getRepackageLossIn(src.unit) || 0;
+        bulkInput.value = Math.max(0, +(src.total - loss).toFixed(4)) || '';
+        bulkUnitSel.value = src.unit;
+        bulkInput.readOnly = true;
+        bulkUnitSel.disabled = true;
+      } else if (bulkInput.readOnly) {
+        bulkInput.readOnly = false;
+        bulkUnitSel.disabled = false;
+        if (window.repackSource === 'package') bulkInput.value = '';
+      }
+    }
+
     const bulkQty = parseFloat(bulkInput?.value || '0');
     const bulkUnit = (bulkUnitSel?.value || 'gal').toLowerCase();
     const pkgOpt = pkgSel && pkgSel.options[pkgSel.selectedIndex];
@@ -1465,6 +1542,7 @@
     } else if (noteEl) {
       noteEl.textContent = '';
     }
+    showRepackageSourceBalance();
   }
 
   window.repackageMode = 'packages';
@@ -1489,22 +1567,206 @@
       panelBulk.style.display = 'none';
       panelPkg.style.display = '';
       recalcRepackagePackagesMode();
+      showRepackageSourceBalance();
     }
   }
 
   // Belt-and-suspenders check before submit, since the real qty field is
   // now hidden/computed rather than directly typed by the user.
   function validateRepackageSubmit(evt) {
+    const fail = (msg) => { evt.preventDefault(); alert(msg); return false; };
     const qtyHidden = document.getElementById('repackage_qty');
     const qty = parseFloat(qtyHidden?.value || '0');
+    const src = window.repackSource;
+
+    if (src === 'tank' && !document.getElementById('repack_tank_id')?.value) {
+      return fail('Pick the tank you\'re filling from.');
+    }
+    if (src === 'package') {
+      const info = getRepackageSourceInfo();
+      if (!info) return fail('Pick the package type you\'re opening and how many.');
+      if (info.count > info.onHand) return fail(`Only ${info.onHand} on hand at this location.`);
+    }
     if (!qty || qty <= 0) {
-      evt.preventDefault();
-      alert(window.repackageMode === 'bulk'
+      return fail(window.repackageMode === 'bulk'
         ? 'Enter a bulk quantity large enough to fill at least one package.'
-        : 'Add at least one package with a quantity greater than 0.');
-      return false;
+        : 'Add at least one package or tank with a quantity greater than 0.');
+    }
+    if (src === 'package') {
+      const info = getRepackageSourceInfo();
+      const dest = repackageDestTotalIn(info.unit);
+      const loss = getRepackageLossIn(info.unit) || 0;
+      if (dest !== null && dest + loss > info.total * 1.001 + 0.01) {
+        return fail('You\'re filling more than the opened packages hold. Open more packages or fill fewer.');
+      }
     }
     return true;
+  }
+
+  // ── Repackage source (loose / tank / packages on hand) ──
+  window.repackSource = 'loose';
+
+  const REPACK_SOURCE_HINTS = {
+    loose:   'Unpackaged product that isn\'t in a tank.',
+    tank:    'Gallons coming out of a tank at this location.',
+    package: 'Full packages already on hand, e.g. breaking a tote into pails or emptying drums into a tank.',
+  };
+
+  function setRepackageSource(src) {
+    window.repackSource = src;
+    document.getElementById('repack_source').value = src;
+    [['loose', 'repackSrcBtnLoose'], ['tank', 'repackSrcBtnTank'], ['package', 'repackSrcBtnPackage']]
+      .forEach(([k, id]) => document.getElementById(id)?.classList.toggle('active', k === src));
+    const hint = document.getElementById('repackSourceHint');
+    if (hint) hint.textContent = REPACK_SOURCE_HINTS[src] || '';
+
+    // Tank picker
+    const tankSel = document.getElementById('repack_tank_id');
+    if (tankSel) {
+      if (src !== 'tank') tankSel.value = '';
+      renderProductTanks(tankSel,
+        document.getElementById('repackage_location_id')?.value,
+        document.getElementById('repackage_product_id')?.value, 'out');
+    }
+
+    // Source package picker
+    const pkgWrap = document.getElementById('repackSourcePackageWrap');
+    if (pkgWrap) pkgWrap.style.display = src === 'package' ? '' : 'none';
+    if (src === 'package') {
+      populateRepackageSourcePackages();
+    } else {
+      const sp = document.getElementById('source_package_id');
+      const sq = document.getElementById('source_package_qty');
+      if (sp) sp.value = '';
+      if (sq) sq.value = '';
+    }
+    refreshRepackageSummary();
+  }
+
+  // Packages of the selected product on hand at the selected location
+  function repackagePackagesOnHand() {
+    const loc = document.getElementById('repackage_location_id')?.value;
+    const pid = document.getElementById('repackage_product_id')?.value;
+    const data = loc && locInventoryCache[loc];
+    if (!data || !pid) return null;
+    const prod = (data.products || []).find(p => String(p.product_id) === String(pid));
+    return prod ? (prod.packages || []).filter(pk => Number(pk.quantity) > 0) : [];
+  }
+
+  function populateRepackageSourcePackages() {
+    const sel = document.getElementById('source_package_id');
+    if (!sel) return;
+    const keep = sel.value;
+    const onHand = repackagePackagesOnHand();
+    if (onHand === null) {
+      sel.innerHTML = '<option value="">Select a location and product first</option>';
+    } else if (!onHand.length) {
+      sel.innerHTML = '<option value="">No packages of this product at this location</option>';
+    } else {
+      sel.innerHTML = '<option value="">Select a package type</option>' + onHand.map(pk => {
+        const def = PKG_OPTIONS.find(o => String(o.id) === String(pk.package_id));
+        if (!def) return '';
+        const name = String(pk.package_name || def.name).replace(/</g, '&lt;');
+        return `<option value="${def.id}" data-volume="${def.volume}" data-unit="${def.unit}" data-onhand="${pk.quantity}">` +
+               `${name} — ${def.volume} ${def.unit} (on hand: ${Number(pk.quantity)})</option>`;
+      }).join('');
+      if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+    }
+    onRepackageSourcePackageChange();
+  }
+
+  // {id, count, volume, unit, total, onHand} for the packages being opened, or null
+  function getRepackageSourceInfo() {
+    const sel = document.getElementById('source_package_id');
+    const qtyInp = document.getElementById('source_package_qty');
+    if (!sel || !sel.value) return null;
+    const opt = sel.options[sel.selectedIndex];
+    const count = parseFloat(qtyInp?.value || '0');
+    if (!count || count <= 0) return null;
+    const volume = parseFloat(opt.dataset.volume || '0');
+    const unit = (opt.dataset.unit || 'gal').toLowerCase();
+    return { id: sel.value, count, volume, unit, total: count * volume,
+             onHand: parseFloat(opt.dataset.onhand || '0'), name: opt.textContent.split(' — ')[0] };
+  }
+
+  function onRepackageSourcePackageChange() {
+    const info = getRepackageSourceInfo();
+    const out = document.getElementById('repackSourcePackageInfo');
+    const fmt = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    if (out) {
+      if (!info) {
+        out.textContent = '';
+      } else if (info.count > info.onHand) {
+        out.textContent = `Only ${fmt(info.onHand)} on hand here.`;
+        out.style.color = '#b91c1c';
+      } else {
+        out.textContent = `Opening ${fmt(info.count)} × ${info.name} = ${fmt(info.total)} ${info.unit.toUpperCase()}`;
+        out.style.color = '#374151';
+      }
+    }
+    // Don't let the package being opened also be offered as a fill target in bulk mode
+    const bulkPkg = document.getElementById('repackage_bulk_package');
+    if (bulkPkg) {
+      [...bulkPkg.options].forEach(o => { o.disabled = !!(info && o.value && o.value === info.id); });
+      if (info && bulkPkg.value === info.id) bulkPkg.value = '';
+    }
+    refreshRepackageSummary();
+  }
+
+  function getRepackageLossIn(unitTo) {
+    const q = parseFloat(document.getElementById('repack_loss_qty')?.value || '0');
+    if (!q || q <= 0) return 0;
+    const u = document.getElementById('repack_loss_unit')?.value || 'gal';
+    return u === unitTo ? q : convertQtyForDisplay(q, u, getRepackageProductWeight(), unitTo);
+  }
+
+  // Sum of everything being filled (package rows + tank rows), converted to unitTo
+  function repackageDestTotalIn(unitTo) {
+    const w = getRepackageProductWeight();
+    let total = 0, ok = true;
+    document.querySelectorAll('#pkg-rows-repackage .pkg-row').forEach(row => {
+      const sel = row.querySelector('.pkg-select');
+      const opt = sel && sel.options[sel.selectedIndex];
+      const qty = parseFloat(row.querySelector('.pkg-qty')?.value || '0');
+      const vol = parseFloat(opt?.dataset?.volume || '0');
+      if (!sel || !sel.value || !qty || !vol) return;
+      const u = (opt.dataset.unit || 'gal').toLowerCase();
+      const v = u === unitTo ? qty * vol : convertQtyForDisplay(qty * vol, u, w, unitTo);
+      if (v === null) ok = false; else total += v;
+    });
+    return ok ? total : null;
+  }
+
+  function refreshRepackageSummary() {
+    if (window.repackageMode === 'bulk') recalcRepackageBulkMode();
+    else { recalcRepackagePackagesMode(); showRepackageSourceBalance(); }
+  }
+
+  // Opening packages: show opened → filled → loss → left over to Unpackaged
+  function showRepackageSourceBalance() {
+    if (window.repackSource !== 'package') return;
+    const noteEl = document.getElementById('repackageRemainderNote');
+    const info = getRepackageSourceInfo();
+    if (!noteEl || !info) return;
+    const fmt = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    const U = info.unit.toUpperCase();
+    const dest = repackageDestTotalIn(info.unit);
+    const loss = getRepackageLossIn(info.unit);
+    if (dest === null || loss === null) {
+      noteEl.textContent = `Can't compare units for this product (missing lb/gal weight).`;
+      noteEl.style.color = '#b45309';
+      return;
+    }
+    const left = info.total - dest - (loss || 0);
+    if (left < -0.01) {
+      noteEl.textContent = `Opening ${fmt(info.total)} ${U} but filling ${fmt(dest + (loss || 0))} ${U} — ${fmt(-left)} ${U} too much.`;
+      noteEl.style.color = '#b91c1c';
+    } else {
+      noteEl.textContent = `Opening ${fmt(info.total)} ${U} • Filling ${fmt(dest)} ${U}` +
+        (loss ? ` • Loss ${fmt(loss)} ${U}` : '') +
+        ` • Left over → Unpackaged: ${fmt(Math.max(0, left))} ${U}`;
+      noteEl.style.color = '#374151';
+    }
   }
 
   buildRepackageBulkPackageOptions();
@@ -1562,7 +1824,8 @@
     const out = document.getElementById('repackageProductOnHand');
     if (!locSel || !prodSel || !out) return;
 
-    if (window.repackageMode === 'bulk') recalcRepackageBulkMode();
+    if (window.repackSource === 'package') populateRepackageSourcePackages();
+    else refreshRepackageSummary();
 
     const locationId = locSel.value;
     const productId = prodSel.value;
@@ -1606,6 +1869,12 @@
       const galText = gal !== null ? `${fmt(gal)} GAL` : '—';
       const lbText  = lb  !== null ? `${fmt(lb)} LB`  : '—';
       out.textContent = `On hand: ${galText}  •  ${lbText}`;
+    }
+    if (prod.unpackaged_qty !== undefined) {
+      const ug = convertQtyForDisplay(prod.unpackaged_qty, prod.unit, prod.weight, 'gal');
+      const pk = (prod.packages || []).map(p => `${Number(p.quantity)} × ${p.package_name}`).join(', ');
+      out.textContent += `  —  Unpackaged: ${ug !== null ? fmt(ug) + ' GAL' : fmt(prod.unpackaged_qty) + ' ' + (prod.unit || '').toUpperCase()}` +
+        (pk ? `  •  Packages: ${pk}` : '');
     }
     out.style.color = '#374151';
   }
@@ -1967,9 +2236,11 @@
     }
 
     window.activeAdjustTab = which;
+    if (window.NStockTabs) window.NStockTabs.save('adjust', which);
   }
 
-  showTab('receive');
+  // Reopen the tab you were last on (for 15 minutes) so any unsaved entries there are visible
+  showTab((window.NStockTabs && window.NStockTabs.load('adjust')) || 'receive');
 </script>
 
 {% endblock %}

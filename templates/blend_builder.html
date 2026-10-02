@@ -104,7 +104,7 @@
       </div>
 
       <div class="card-body">
-        <form id="blendForm" class="row g-3">
+        <form id="blendForm" class="row g-3" data-no-draft>
           <div class="col-12 col-lg-4">
             <label class="form-label">Blend name</label>
             <input class="form-control" id="blendName" placeholder="e.g., Shop Solvent A" />
@@ -176,8 +176,8 @@
 
     <!-- Actions -->
     <div class="d-flex justify-content-end gap-2">
-      <button class="btn btn-outline-secondary" id="resetBtn" type="button">Reset</button>
       <button class="btn btn-success" id="buildBtn" type="button">Build Blend</button>
+      <button class="btn btn-outline-secondary" id="resetBtn" type="button" title="Clear this blend">Clear</button>
     </div>
 
     <!-- Results (shown after success) -->
@@ -517,8 +517,8 @@
       const data = await res.json();
       products = data.products || [];
       buildProductNameMap();
-      // seed two empty rows
-      if (rowsEl.children.length === 0) {
+      // bring back unsaved entries, otherwise seed two empty rows
+      if (rowsEl.children.length === 0 && !restoreBuilder()) {
         addRow();
         addRow();
       }
@@ -582,6 +582,10 @@
         return;
       }
 
+      // Success — the entries are done, so forget the saved draft
+      clearTimeout(builderSaveTimer);
+      if (window.NStockDrafts) window.NStockDrafts.drop('builder');
+
       // Success — show summary & link to new product
       const np = data.result.blend_product || data.result.new_product || {};
       document.getElementById('resultCard').classList.remove('d-none');
@@ -608,6 +612,7 @@
         b.classList.toggle('active', isActive);
         b.setAttribute('aria-selected', isActive ? 'true' : 'false');
       });
+      if (window.NStockTabs) window.NStockTabs.save('blend', tabName);
 
       Object.keys(panels).forEach(k => {
         const p = panels[k];
@@ -624,6 +629,13 @@
     document.getElementById('addRowBtn').addEventListener('click', () => addRow());
     document.getElementById('buildBtn').addEventListener('click', buildBlend);
     document.getElementById('resetBtn').addEventListener('click', () => {
+      clearTimeout(builderSaveTimer);
+      if (window.NStockDrafts) window.NStockDrafts.drop('builder');
+      document.getElementById('blendName').value = '';
+      document.getElementById('targetQty').value = '';
+      document.getElementById('targetUnit').value = 'gal';
+      document.getElementById('modePercent').checked = true;
+      setMode('percent');
       rowsEl.innerHTML = '';
       addRow(); addRow();
       showErrors([]);
@@ -643,8 +655,55 @@
       sel.addEventListener('change', () => { try { localStorage.setItem(KEY, sel.value); } catch (e) {} });
     })();
 
+    // --- Unsaved builder entries survive leaving the page for 15 minutes ---
+    function builderState() {
+      return {
+        name: document.getElementById('blendName').value,
+        location: document.getElementById('buildLocation').value,
+        targetQty: document.getElementById('targetQty').value,
+        targetUnit: document.getElementById('targetUnit').value,
+        mode: mode,
+        rows: [...rowsEl.querySelectorAll('tr')].map(tr => ({
+          product_id: tr.querySelector('td select')?.value || '',
+          percent: tr.querySelector('.percent-col input')?.value || null,
+          qty: tr.querySelector('.qty-col input')?.value || null,
+          qty_unit: tr.querySelector('.unit-col select')?.value || null,
+        })),
+      };
+    }
+    let builderSaveTimer = null;
+    function saveBuilderSoon() {
+      if (!window.NStockDrafts) return;
+      clearTimeout(builderSaveTimer);
+      builderSaveTimer = setTimeout(() => window.NStockDrafts.put('builder', builderState()), 300);
+    }
+    function restoreBuilder() {
+      const d = window.NStockDrafts && window.NStockDrafts.get('builder');
+      if (!d) return false;
+      document.getElementById('blendName').value = d.name || '';
+      const loc = document.getElementById('buildLocation');
+      if ([...loc.options].some(o => o.value === d.location)) loc.value = d.location;
+      document.getElementById('targetQty').value = d.targetQty || '';
+      document.getElementById('targetUnit').value = d.targetUnit || 'gal';
+      document.getElementById(d.mode === 'absolute' ? 'modeAbsolute' : 'modePercent').checked = true;
+      rowsEl.innerHTML = '';
+      (d.rows || []).forEach(r => addRow(r));
+      setMode(d.mode === 'absolute' ? 'absolute' : 'percent');
+      return rowsEl.children.length > 0;
+    }
+    const bbPanel = document.getElementById('bbPanelBuilder');
+    if (bbPanel) {
+      bbPanel.addEventListener('input', saveBuilderSoon, true);
+      bbPanel.addEventListener('change', saveBuilderSoon, true);
+      bbPanel.addEventListener('click', e => { if (e.target.closest('button')) saveBuilderSoon(); }, true);
+    }
+
     // --- Init ---
+    {% if show_exec and show_builder %}
+    showBlendTab((window.NStockTabs && window.NStockTabs.load('blend')) || 'execute');
+    {% else %}
     showBlendTab('{{ "execute" if show_exec else "builder" }}');
+    {% endif %}
     setMode('percent');
     {% if show_builder %}fetchProducts();{% endif %}
 

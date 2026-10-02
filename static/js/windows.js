@@ -215,6 +215,15 @@
     const box = document.getElementById('winHeaderControls');
     if (!box) return;
     const win = topMaximized();
+    // The header Back button works on a maximized window (its own title bar is hidden)
+    const navBack = document.getElementById('navBackBtn');
+    if (navBack) {
+      let can = window.NStockCanGoBack ? window.NStockCanGoBack() : false;
+      if (win) {
+        try { can = win.querySelector('.fw-iframe').contentWindow.NStockCanGoBack(); } catch (e) { can = false; }
+      }
+      navBack.disabled = !can;
+    }
     box.hidden = !win;
     box._win = win;
     if (win) box.querySelector('.whc-title').textContent = win.querySelector('.fw-title').textContent;
@@ -338,6 +347,13 @@
   }
 
   function setupControls(win, key) {
+    win.querySelector('.fw-back').addEventListener('click', function (e) {
+      e.stopPropagation();
+      try {
+        const cw = win.querySelector('.fw-iframe').contentWindow;
+        if (cw.NStockBack) cw.NStockBack();
+      } catch (err) { /* page not loaded yet */ }
+    });
     win.querySelector('.fw-close').addEventListener('click', function (e) {
       e.stopPropagation();
       closeWindow(win);
@@ -386,6 +402,9 @@
     win.innerHTML =
       '<div class="fw-inner">' +
         '<div class="fw-titlebar">' +
+          '<button class="fw-btn fw-back" title="Back to the last page in this window" disabled>' +
+            '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg>' +
+          '</button>' +
           '<span class="fw-title"></span>' +
           '<div class="fw-controls">' +
             '<button class="fw-btn fw-shade" title="Minimize">\u2013</button>' +
@@ -411,10 +430,17 @@
 
     const iframeSrc = url + (url.indexOf('?') > -1 ? '&' : '?') + 'embed=1';
     const iframe = win.querySelector('.fw-iframe');
+    // A name per window gives each one its own Back history (see nstock-nav.js)
+    iframe.name = 'nstock-win-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     iframe.src = iframeSrc;
     // When you move to another page inside the window, retitle the window
     // from that page's heading so the title bar (and header) stay accurate.
     iframe.addEventListener('load', function () {
+      try {
+        const cw = iframe.contentWindow;
+        win.querySelector('.fw-back').disabled = !(cw.NStockCanGoBack && cw.NStockCanGoBack());
+      } catch (e) { /* not ready */ }
+      updateHeaderControls();
       try {
         const h = iframe.contentDocument.querySelector('main h1, main h2, h1, h2');
         const text = h && h.textContent.trim().replace(/\s+/g, ' ');
@@ -443,6 +469,15 @@
       shadeAllWindows();
     }
   });
+
+  // Header Back: step back inside the maximized window if one is in front,
+  // otherwise let nstock-nav.js go back on the page itself.
+  window.nstockWindowBack = function () {
+    const win = topMaximized();
+    if (!win) return false;
+    try { win.querySelector('.fw-iframe').contentWindow.NStockBack(); } catch (e) { /* not loaded */ }
+    return true;
+  };
 
   setupHeaderControls();
   attachLinkInterception();

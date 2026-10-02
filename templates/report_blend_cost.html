@@ -42,8 +42,14 @@
 </div>
 
 <div class="d-flex justify-content-end mb-3">
-  <a class="btn btn-sm btn-success"
+  {# PDFs open outside the floating window: browsers (Safari especially) can
+     silently block a download that starts inside a window's iframe. #}
+  <a class="btn btn-sm btn-outline-secondary me-2" target="_blank" rel="noopener"
      href="{{ url_for('report_blend_cost_pdf', formula_id=selected_ids) }}">
+    View / Print PDF
+  </a>
+  <a class="btn btn-sm btn-success" target="_top" download
+     href="{{ url_for('report_blend_cost_pdf', formula_id=selected_ids, download=1) }}">
     Download PDF
   </a>
 </div>

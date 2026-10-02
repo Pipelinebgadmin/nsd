@@ -6,74 +6,171 @@
     max-width:100% !important;width:100% !important;margin-left:0 !important;margin-right:0 !important;
     padding-left:1.25rem !important;padding-right:1.25rem !important;
   }
-  .page-title{font-weight:600;}
-  .text-muted-small{color:#6c757d;font-size:.9rem;}
+  .bi-table th, .bi-table td { white-space: nowrap; }
+  .bi-table tr.short td { background: #fde2e2; }
+  .bi-table .st-short { color: #b91c1c; font-weight: 700; }
+  .bi-table .st-ok { color: #15803d; font-weight: 600; }
+  .bi-table tfoot td { font-weight: 700; border-top: 2px solid #2c3e50; }
+  .bi-head dt { color: #64748b; font-weight: 500; }
 </style>
 
+{% macro num(v, d=2) %}{{ '—' if v is none else ('{:,.%df}' % d).format(v) }}{% endmacro %}
+
 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2" style="margin-top:-6px;">
-  <h2 class="section-title">Blend Instruction</h2>
+  <h2 class="section-title">Blend Instructions</h2>
   <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('reports_center') }}">&larr; Report Center</a>
 </div>
 
 <div class="card mb-4">
-  <div class="card-header bg-white">Choose a Formula</div>
+  <div class="card-header bg-white">What are you making?</div>
   <div class="card-body">
-    <form class="row gy-2 gx-2 align-items-end" method="get" action="{{ url_for('report_blend_instruction') }}">
-      <div class="col-12 col-md-6">
-        <select class="form-select" name="formula_id" onchange="this.form.submit()">
+    <form class="row gy-2 gx-2 align-items-end" method="get" action="{{ url_for('report_blend_instruction') }}" id="biForm">
+      {% if request.args.get('embed') %}<input type="hidden" name="embed" value="1">{% endif %}
+      <div class="col-12 col-md-3">
+        <label class="form-label small mb-1" for="biFormula">Formula</label>
+        <select class="form-select" id="biFormula" name="formula_id">
           {% for f in formulas %}
-            <option value="{{ f.id }}" {% if formula and f.id==formula.id %}selected{% endif %}>{{ f.name }}</option>
+            <option value="{{ f.id }}" {% if f.id == sel.formula_id %}selected{% endif %}>{{ f.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1" for="biQty">Batch size</label>
+        <input class="form-control" id="biQty" name="batch_qty" type="number" step="any" min="0" value="{{ sel.batch_qty }}" required>
+      </div>
+      <div class="col-6 col-md-1">
+        <label class="form-label small mb-1" for="biUnit">Unit</label>
+        <select class="form-select" id="biUnit" name="batch_unit">
+          <option value="gal" {% if sel.batch_unit == 'gal' %}selected{% endif %}>GAL</option>
+          <option value="lb" {% if sel.batch_unit == 'lb' %}selected{% endif %}>LBS</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1" for="biLoc">Location</label>
+        <select class="form-select" id="biLoc" name="location_id">
+          {% for l in locations %}
+            <option value="{{ l.id }}" {% if (l.id|string) == (sel.location_id|string) %}selected{% endif %}>{{ l.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-1" for="biTank">Tank <span class="text-muted">(optional)</span></label>
+        <select class="form-select" id="biTank" name="tank_id">
+          <option value="">— No tank —</option>
+          {% for t in tanks %}
+            <option value="{{ t.id }}" data-loc="{{ t.location_id }}" {% if (t.id|string) == (sel.tank_id|string) %}selected{% endif %}>{{ t.name }}</option>
           {% endfor %}
         </select>
       </div>
       <div class="col-12 col-md-2">
-        <button class="btn btn-primary btn-sm w-100" type="submit">View</button>
+        <button class="btn btn-primary w-100" type="submit">Update</button>
       </div>
     </form>
   </div>
 </div>
 
-{% if formula %}
+{% if rep %}
 <div class="d-flex justify-content-end mb-3">
-  <a class="btn btn-sm btn-success" href="{{ url_for('report_blend_instruction_pdf', formula_id=formula.id) }}">
+  {# PDFs open outside the floating window: browsers (Safari especially) can
+     silently block a download that starts inside a window's iframe. #}
+  <a class="btn btn-sm btn-outline-secondary me-2" target="_blank" rel="noopener"
+     href="{{ url_for('report_blend_instruction_pdf', formula_id=sel.formula_id, batch_qty=sel.batch_qty, batch_unit=sel.batch_unit, location_id=sel.location_id, tank_id=sel.tank_id or '') }}">
+    View / Print PDF
+  </a>
+  <a class="btn btn-sm btn-success" target="_top" download
+     href="{{ url_for('report_blend_instruction_pdf', formula_id=sel.formula_id, batch_qty=sel.batch_qty, batch_unit=sel.batch_unit, location_id=sel.location_id, tank_id=sel.tank_id or '', download=1) }}">
     Download PDF
   </a>
 </div>
 
+{% for w in rep.warnings %}
+  <div class="alert alert-danger py-2 mb-2"><strong>Warning:</strong> {{ w }}</div>
+{% endfor %}
+{% if rep.shorts %}
+  <div class="alert alert-danger py-2 mb-2"><strong>Short:</strong> not enough on hand at {{ rep.location_name or 'the blend location' }} for {{ rep.shorts|join(', ') }}.</div>
+{% endif %}
+
 <div class="card">
-  <div class="card-header bg-white fw-semibold">{{ formula.name }}</div>
+  <div class="card-header bg-white">
+    <div class="fw-semibold fs-5">{{ rep.blend_name }}</div>
+    <dl class="row mb-0 small bi-head mt-2">
+      <dt class="col-sm-2">Formula</dt><dd class="col-sm-10">{{ rep.formula.name }} <span class="text-muted">(ID {{ rep.formula.id }})</span></dd>
+      <dt class="col-sm-2">Batch size</dt><dd class="col-sm-10">{{ num(rep.batch_gal) }} gal &nbsp;/&nbsp; {{ num(rep.batch_lb) }} lbs</dd>
+      <dt class="col-sm-2">Made at</dt><dd class="col-sm-10">{{ rep.location_name or '—' }}{% if rep.tank_name %} — Tank {{ rep.tank_name }}{% endif %}</dd>
+      <dt class="col-sm-2">Percent basis</dt>
+      <dd class="col-sm-10"><strong>{{ 'By volume' if rep.basis == 'volume' else 'By weight' }}</strong>
+        <span class="text-muted">(percentages apply in the unit the batch is entered in: GAL = by volume, LBS = by weight)</span></dd>
+      <dt class="col-sm-2">Inventory as of</dt><dd class="col-sm-10">{{ rep.printed_at }} (live)</dd>
+    </dl>
+  </div>
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table mb-0 align-middle">
+      <table class="table mb-0 align-middle bi-table">
         <thead class="table-light">
           <tr>
-            <th>Component</th>
-            <th class="text-end">Percent</th>
-            <th class="text-end">Qty for 100 gal batch</th>
+            <th>Component</th><th class="text-end">% of blend</th>
+            <th class="text-end">Need (gal)</th><th class="text-end">Need (lbs)</th>
+            <th class="text-end">On hand @ {{ rep.location_name or 'location' }} (gal)</th>
+            <th class="text-end">On hand @ {{ rep.location_name or 'location' }} (lbs)</th>
+            <th class="text-end">All locations (gal)</th><th class="text-end">All locations (lbs)</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
-          {% for c in formula.components %}
-            {% set p = products_by_id.get(c.product_id|string) %}
-          <tr>
-            <td>{{ p.name if p else c.product_id }}</td>
-            <td class="text-end">{{ '%.2f'|format(c.percent) }}%</td>
-            <td class="text-end">{{ '%.2f'|format(c.percent) }} gal</td>
+          {% for r in rep.rows %}
+          <tr class="{{ 'short' if r.status == 'SHORT' }}">
+            <td>{{ r.name }}</td>
+            <td class="text-end">{{ '%.2f'|format(r.percent) }}%</td>
+            <td class="text-end">{{ num(r.need_gal) }}</td>
+            <td class="text-end">{{ num(r.need_lb) }}</td>
+            <td class="text-end">{{ num(r.loc_gal) }}</td>
+            <td class="text-end">{{ num(r.loc_lb) }}</td>
+            <td class="text-end">{{ num(r.all_gal) }}</td>
+            <td class="text-end">{{ num(r.all_lb) }}</td>
+            <td>
+              {% if r.status == 'SHORT' %}
+                <span class="st-short">SHORT</span>
+                <div class="small st-short">missing {% if r.short_gal is not none %}{{ num(r.short_gal) }} gal{% endif %}{% if r.short_gal is not none and r.short_lb is not none %} / {% endif %}{% if r.short_lb is not none %}{{ num(r.short_lb) }} lbs{% endif %}</div>
+              {% elif r.status == 'OK' %}<span class="st-ok">OK</span>
+              {% else %}{{ r.status }}{% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
+        <tfoot>
+          <tr>
+            <td>TOTAL</td>
+            <td class="text-end {{ 'text-danger' if (rep.total_pct - 100)|abs > 0.001 }}">{{ '%.2f'|format(rep.total_pct) }}%</td>
+            <td class="text-end">{{ num(rep.sum_gal) }}</td>
+            <td class="text-end">{{ num(rep.sum_lb) }}</td>
+            <td colspan="5"></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   </div>
-  {% if formula.description %}
+  {% if rep.formula.description %}
   <div class="card-body border-top">
     <div class="fw-semibold mb-1">Notes</div>
-    <div>{{ formula.description }}</div>
+    <div>{{ rep.formula.description }}</div>
   </div>
   {% endif %}
 </div>
 {% else %}
-<div class="text-muted p-3">No formulas found. Build one in Blend Builder first.</div>
+<div class="text-muted p-3">No formulas found. Build one in the Formula Catalog first.</div>
 {% endif %}
 
+<script>
+  // Only offer the tanks at the chosen location
+  (function () {
+    const loc = document.getElementById('biLoc'), tank = document.getElementById('biTank');
+    if (!loc || !tank) return;
+    function sync() {
+      [...tank.options].forEach(o => { if (o.value) o.hidden = o.dataset.loc !== loc.value; });
+      if (tank.selectedOptions[0] && tank.selectedOptions[0].hidden) tank.value = '';
+    }
+    loc.addEventListener('change', sync);
+    sync();
+  })();
+</script>
 {% endblock %}
