@@ -18,7 +18,7 @@
     <h2 class="section-title mb-0">Purchasing</h2>
     <div class="text-muted small">Every receipt from the receive screens. Enter the vendor and price per unit. This is where inventory cost comes from.</div>
   </div>
-  <input type="search" id="puSearch" class="form-control" placeholder="Search PO, BOL, product, vendor…" style="min-width:260px; max-width:320px;">
+  <input type="search" id="puSearch" class="form-control" placeholder="Search PO, BOL, product, vendor…" style="min-width:260px; max-width:320px;" value="{{ q }}">
 </div>
 
 <ul class="nav nav-tabs mb-0">
@@ -116,12 +116,14 @@
   const body = document.getElementById("puBody");
   const search = document.getElementById("puSearch");
 
-  search && search.addEventListener("input", function () {
+  function filter() {
     const q = search.value.trim().toLowerCase();
     document.querySelectorAll("#puBody tr").forEach(function (tr) {
       tr.hidden = q && !tr.dataset.search.includes(q);
     });
-  });
+  }
+  search && search.addEventListener("input", filter);
+  search && search.value && filter();  // opened from the master search
   if (!body) return;
   // compare prices as numbers, however they were written
   body.querySelectorAll("tr").forEach(function (tr) {

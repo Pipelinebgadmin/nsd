@@ -112,6 +112,17 @@
   color:inherit;
 }
 
+/* open-assignment count in the corner of the Assignments card */
+.tool-card{ position:relative; }
+.card-count{
+  position:absolute; top:-8px; right:-8px;
+  min-width:24px; height:24px; padding:0 7px;
+  border-radius:12px; background:#dc2626; color:#fff;
+  font-size:13px; font-weight:700; line-height:24px; text-align:center;
+  box-shadow:0 2px 6px rgba(220,38,38,.35);
+}
+.card-count[hidden]{ display:none; }
+
 /* grids */
 
 .tools-grid{
@@ -263,6 +274,16 @@
         </div>
       </a>
       {% endif %}
+
+      <a href="{{ url_for('assignments_page') }}" class="card-link" data-win data-win-title="Assignments">
+        <div class="tool-card">
+          <span class="card-count" data-asn-badge {{ 'hidden' if not my_open_assignments }}
+                aria-label="{{ my_open_assignments }} open assignments">{{ my_open_assignments }}</span>
+          <img src="{{ url_for('static', filename='images/icons/assignments.svg') }}" alt="">
+          <div class="card-title">Assignments</div>
+          <div class="card-subtext">Tasks &amp; messages</div>
+        </div>
+      </a>
 
       {% if can('purchasing') %}
       <a href="{{ url_for('purchasing_page') }}" class="card-link" data-win data-win-title="Purchasing">

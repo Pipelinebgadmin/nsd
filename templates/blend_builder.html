@@ -234,6 +234,12 @@
             .src-status { font-weight: 700; white-space: nowrap; }
             .src-status.ok { color: #15803d; } .src-status.short { color: #b91c1c; } .src-status.over { color: #b45309; }
             .src-name { font-weight: 600; white-space: nowrap; }
+            /* recommended pull (plan_pull) and the "pulled as instructed" tick */
+            .src-pull { font-size: .74rem; color: #1e40af; max-width: 300px; white-space: normal; margin-top: 2px; }
+            .src-pull.short { color: #b91c1c; }
+            .src-done { white-space: nowrap; font-size: .78rem; font-weight: 600; cursor: pointer; }
+            .src-table tr.as-instructed td { background-color: #f0fdf4 !important; }
+            .src-table .locked { pointer-events: none; background-color: #e9ecef; }
           </style>
 
           <div class="row g-3">
@@ -761,7 +767,9 @@
           '<th class="tank-col text-center" colspan="2">From tank<br>tank &middot; gal</th>' +
           '<th class="partial-col text-center">From partial<br>(GAL)</th>' +
           '<th class="open-col text-center" colspan="2">Opened a package<br>type &middot; gal out</th>' +
-          '<th class="text-end">Pulled<br>(GAL)</th><th>Status</th><th></th></tr>';
+          '<th class="text-end">Pulled<br>(GAL)</th><th>Status</th>' +
+          '<th class="text-center"><label class="src-done" title="Tick every ingredient that was pulled exactly as the instruction says">' +
+          '<input type="checkbox" class="form-check-input me-1" id="srcAllDone">All as<br>instructed</label></th></tr>';
 
         body.innerHTML = plan.components.map(c => {
           const byId = Object.fromEntries(c.packages.map(p => [p.package_id, p]));
@@ -783,7 +791,8 @@
           const openOpts = '<option value="">&ndash;</option>' + c.packages.map(p =>
             `<option value="${p.package_id}" data-vol="${p.volume_gal}">${esc(p.package_name)}</option>`).join('');
           return `<tr data-pid="${c.product_id}" data-needed="${c.needed_gal}" data-partial-avail="${c.unpackaged_gal}">
-              <td><div class="src-name">${esc(c.name)}</div><div class="src-avail">${fmt(c.percent)}% &middot; ${fmt(c.bulk_gal)} gal on hand${c.tank_gal ? ' &middot; ' + fmt(c.tank_gal) + ' in tanks' : ''}</div></td>
+              <td><div class="src-name">${esc(c.name)}</div><div class="src-avail">${fmt(c.percent)}% &middot; ${fmt(c.bulk_gal)} gal on hand${c.tank_gal ? ' &middot; ' + fmt(c.tank_gal) + ' in tanks' : ''}</div>
+                  ${pullText(c)}</td>
               <td class="text-end fw-semibold">${Number(qtyEl.value) > 0 ? fmt(c.needed_gal) : '&ndash;'}</td>
               ${pkgCells}
               ${tankCells}
@@ -795,7 +804,10 @@
                     name="opengal__${c.product_id}" ${c.packages.length ? '' : 'disabled'} aria-label="Gallons out of opened package"></td>
               <td class="text-end fw-semibold src-pulled">0</td>
               <td class="src-status short">Short</td>
-              <td><button type="button" class="btn btn-sm btn-outline-secondary src-suggest" title="Fill in a suggestion">Suggest</button></td>
+              <td class="text-center">${c.pull && c.pull.steps.length && Number(qtyEl.value) > 0
+                ? `<label class="src-done" ${c.pull.short_gal ? 'title="Not enough on hand here to follow the instruction"' : 'title="Fill this row in exactly as the instruction says"'}>
+                     <input type="checkbox" class="form-check-input me-1 src-done-cb" ${c.pull.short_gal ? 'disabled' : ''}>Pulled as<br>instructed</label>`
+                : ''}</td>
             </tr>`;
         }).join('');
 
@@ -817,7 +829,54 @@
         outRows.innerHTML = '';
         keep.forEach(([id, q]) => addOutRow(id, q));
         body.querySelectorAll('input, select').forEach(el => el.addEventListener('input', recalc));
-        body.querySelectorAll('.src-suggest').forEach(btn => btn.addEventListener('click', () => suggest(btn.closest('tr'))));
+        // "Pulled as instructed": fill the row from the plan and lock it; untick to type it in yourself
+        body.querySelectorAll('.src-done-cb').forEach(cb => cb.addEventListener('change', () => {
+          setInstructed(cb.closest('tr'), cb.checked);
+          syncAllDone();
+        }));
+        const all = document.getElementById('srcAllDone');
+        all.addEventListener('change', () => {
+          body.querySelectorAll('.src-done-cb:not(:disabled)').forEach(cb => { cb.checked = all.checked; setInstructed(cb.closest('tr'), all.checked); });
+          syncAllDone();
+        });
+        // keep ticks across a reload of the plan (batch size or location changed)
+        body.querySelectorAll('tr').forEach(tr => {
+          const cb = tr.querySelector('.src-done-cb');
+          if (cb && !cb.disabled && instructed.has(tr.dataset.pid)) { cb.checked = true; setInstructed(tr, true); }
+        });
+        syncAllDone();
+        recalc();
+      }
+
+      const instructed = new Set();  // product ids ticked "pulled as instructed"
+
+      function pullText(c) {
+        if (!c.pull || !c.pull.steps.length || !(Number(qtyEl.value) > 0)) return '';
+        return `<div class="src-pull ${c.pull.short_gal ? 'short' : ''}">Pull: ${c.pull.steps.map(esc).join(' &middot; ')}</div>`;
+      }
+
+      function syncAllDone() {
+        const all = document.getElementById('srcAllDone');
+        if (!all) return;
+        const cbs = [...body.querySelectorAll('.src-done-cb:not(:disabled)')];
+        all.disabled = !cbs.length;
+        all.checked = cbs.length > 0 && cbs.every(cb => cb.checked);
+        all.indeterminate = !all.checked && cbs.some(cb => cb.checked);
+      }
+
+      function setInstructed(tr, on) {
+        const c = plan.components.find(x => String(x.product_id) === tr.dataset.pid);
+        const fields = tr.querySelectorAll('input:not(.src-done-cb), select');
+        fields.forEach(el => { el.value = ''; el.classList.toggle('locked', on); if (el.tagName === 'INPUT') el.readOnly = on; el.tabIndex = on ? -1 : 0; });
+        tr.classList.toggle('as-instructed', on);
+        if (on) instructed.add(tr.dataset.pid); else instructed.delete(tr.dataset.pid);
+        if (on && c && c.pull) {
+          const p = c.pull, set = (sel, v) => { const el = tr.querySelector(sel); if (el) el.value = v; };
+          if (p.partial_gal) set('.src-partial', p.partial_gal);
+          if (p.tank) { set('.src-tank', p.tank.tank_id); set('.src-tankgal', p.tank.gal); }
+          p.full.forEach(f => set(`.src-full[name="full__${c.product_id}__${f.package_id}"]`, f.qty));
+          if (p.open) { set('.src-openpkg', p.open.package_id); set('.src-opengal', p.open.gal_out); }
+        }
         recalc();
       }
 
@@ -931,38 +990,6 @@
         if (o.gal > total + TOL) { outSummary.innerHTML = `<span class="text-danger fw-semibold">That's ${fmt(o.gal)} gal but the batch is only ${fmt(total)} gal.</span>`; return false; }
         outSummary.innerHTML = `<span class="fw-semibold">${fmt(o.gal)} gal placed</span> &middot; ${fmt(total - o.gal)} gal left unpackaged`;
         return true;
-      }
-
-      // Suggestion: use partial stock first, then full packages (largest first), then open one for the rest.
-      function suggest(tr) {
-        let left = Number(tr.dataset.needed);
-        tr.querySelectorAll('input').forEach(i => i.value = '');
-        tr.querySelector('.src-openpkg').value = '';
-        const tSel = tr.querySelector('.src-tank');
-        if (tSel) {
-          tSel.value = '';
-          // Largest tank first
-          const best = [...tSel.options].slice(1).sort((a, b) => Number(b.dataset.fill) - Number(a.dataset.fill))[0];
-          if (best && left > TOL) {
-            const take = Math.min(Number(best.dataset.fill), left);
-            tSel.value = best.value; tr.querySelector('.src-tankgal').value = +take.toFixed(3); left -= take;
-          }
-        }
-        const partial = Math.min(Number(tr.dataset.partialAvail), left);
-        if (partial > TOL) { tr.querySelector('.src-partial').value = +partial.toFixed(3); left -= partial; }
-        const fulls = [...tr.querySelectorAll('.src-full')].sort((a, b) => Number(b.dataset.vol) - Number(a.dataset.vol));
-        for (const i of fulls) {
-          const vol = Number(i.dataset.vol), n = Math.min(Math.floor((left + TOL) / vol), Number(i.dataset.have));
-          if (n > 0) { i.value = n; left -= n * vol; }
-        }
-        if (left > TOL) {
-          const sel = tr.querySelector('.src-openpkg');
-          const used = Object.fromEntries(fulls.map(i => [i.name.split('__')[2], parseFloat(i.value) || 0]));
-          const opt = [...sel.options].slice(1).sort((a, b) => Number(a.dataset.vol) - Number(b.dataset.vol))
-            .find(o => Number(o.dataset.vol) + TOL >= left && used[o.value] < Number(tr.querySelector(`.src-full[name$="__${o.value}"]`)?.dataset.have || 0));
-          if (opt) { sel.value = opt.value; tr.querySelector('.src-opengal').value = +left.toFixed(3); }
-        }
-        recalc();
       }
 
       const errPanel = document.getElementById('execErrors');

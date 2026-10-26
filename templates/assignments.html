@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .asn-tabs .badge { font-size: .7rem; }
+  .asn-item { border-bottom: 1px solid #eef1f4; padding: 12px 16px; }
+  .asn-item:last-child { border-bottom: 0; }
+  .asn-item.closed { background: #fafafa; }
+  .asn-item.closed .asn-summary { color: #64748b; }
+  .asn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .asn-type { font-size: .7rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+  .asn-type.cycle_count { background: #e0f2fe; color: #075985; }
+  .asn-type.blend { background: #ede9fe; color: #5b21b6; }
+  .asn-type.reception { background: #dcfce7; color: #166534; }
+  .asn-type.custom { background: #f1f5f9; color: #334155; }
+  .asn-summary { font-weight: 600; flex: 1 1 260px; }
+  .asn-meta { font-size: .8rem; color: #64748b; margin-top: 2px; }
+  .asn-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .asn-thread { margin-top: 10px; padding-left: 12px; border-left: 3px solid #e2e8f0; }
+  .asn-msg { font-size: .85rem; margin-bottom: 6px; white-space: pre-wrap; }
+  .asn-msg .who { font-weight: 600; }
+  .asn-msg .when { color: #94a3b8; font-size: .75rem; }
+  .asn-reply { display: flex; gap: 6px; margin-top: 8px; max-width: 560px; }
+  .asn-type-pick .btn { min-width: 120px; }
+  .asn-products { max-height: 240px; overflow: auto; border: 1px solid #dee2e6; border-radius: 6px; padding: 6px 10px; }
+  .asn-products label { display: block; font-size: .88rem; }
+  .modal-backdrop { z-index: 2990; }
+  .modal { z-index: 3000; }
+</style>
+
+{% set open_mine = mine|selectattr('status', 'equalto', 'open')|list|length %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="section-title mb-0">Assignments</h2>
+    <div class="text-muted small">Tasks and messages sent to you, and the ones you've sent.</div>
+  </div>
+  <a href="{{ url_for('assignments_page', tab='new') }}" class="btn btn-primary">New Assignment</a>
+</div>
+
+<ul class="nav nav-tabs asn-tabs">
+  {% for key, label, n, warn in [('mine', 'My Assignments', open_mine, true), ('sent', 'Sent', none, false),
+                                 ('responses', 'Responses', responses|length, false), ('new', 'New', none, false)] %}
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if tab == key }}" href="{{ url_for('assignments_page', tab=key) }}">
+      {{ label }}{% if n %} <span class="badge {{ 'bg-danger' if warn else 'bg-secondary' }}">{{ n }}</span>{% endif %}
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+
+{% macro thread(a, current_tab) %}
+  {% if a.messages %}
+  <div class="asn-thread">
+    {% for m in a.messages %}
+    <div class="asn-msg"><span class="who">{{ m.by }}</span> <span class="when">{{ m.at|datetimeformat("%m/%d/%y %I:%M %p") }}</span><br>{{ m.text }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if a.status == 'complete' %}
+  <div class="asn-thread">
+    <div class="asn-msg text-success"><span class="who">Completed by {{ a.completed_by }}</span> <span class="when">{{ a.completed_at|datetimeformat("%m/%d/%y %I:%M %p") }}</span>{% if a.completion_note %}<br>{{ a.completion_note }}{% endif %}</div>
+  </div>
+  {% endif %}
+  <form class="asn-reply" method="POST" action="{{ url_for('assignment_reply', aid=a.id) }}">
+    <input type="hidden" name="tab" value="{{ current_tab }}">
+    <input class="form-control form-control-sm" name="text" placeholder="Reply…" maxlength="2000" required>
+    <button class="btn btn-sm btn-outline-primary">Send</button>
+  </form>
+{% endmacro %}
+
+{% macro item(a, current_tab) %}
+  <div class="asn-item {{ 'closed' if a.status != 'open' }}" id="{{ a.id }}">
+    <div class="asn-head">
+      <span class="badge asn-type {{ a.type }}">{{ a.type_label }}</span>
+      <span class="asn-summary">{{ a.summary }}</span>
+      {% if a.status == 'complete' %}<span class="badge bg-success">Complete</span>
+      {% elif a.status == 'cancelled' %}<span class="badge bg-secondary">Cancelled</span>{% endif %}
+      <div class="asn-actions">
+        {% if a.type != 'custom' %}
+        <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener" href="{{ url_for('assignment_pdf', aid=a.id) }}">PDF</a>
+        {% endif %}
+        {% if current_tab == 'mine' and a.status == 'open' %}
+        <button type="button" class="btn btn-sm btn-success asn-complete" data-id="{{ a.id }}"
+                data-url="{{ url_for('assignment_complete', aid=a.id) }}" data-summary="{{ a.summary }}">Complete</button>
+        {% endif %}
+        {% if current_tab == 'sent' and a.status == 'open' %}
+        <form method="POST" action="{{ url_for('assignment_cancel', aid=a.id) }}" class="m-0"
+              onsubmit="return confirm('Cancel {{ a.id }}? It comes off their list.');">
+          <button class="btn btn-sm btn-outline-danger">Cancel</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <div class="asn-meta">
+      {{ a.id }}
+      &middot; {% if current_tab == 'sent' %}to <b>{{ a.assigned_to_name }}</b>{% else %}from <b>{{ a.created_by_name }}</b>{% endif %}
+      {% if a.location_name %}&middot; {{ a.location_name }}{% endif %}
+      &middot; sent {{ a.created_at|datetimeformat("%m/%d/%y %I:%M %p") }}
+      {% if a.due_date %}&middot; <b>due {{ a.due_date }}</b>{% endif %}
+    </div>
+    {% if a.note %}<div class="asn-meta" style="white-space:pre-wrap;">Note: {{ a.note }}</div>{% endif %}
+    {{ thread(a, current_tab) }}
+  </div>
+{% endmacro %}
+
+<div class="card section-card shadow-sm" style="border-top-left-radius:0;">
+  {% if tab == 'sent' %}
+    {% for a in sent %}{{ item(a, 'sent') }}{% else %}<div class="card-body text-muted">You haven't sent anything yet.</div>{% endfor %}
+
+  {% elif tab == 'responses' %}
+    {% for r in responses %}
+    {% set a = r.assignment %}
+    <div class="asn-item">
+      <div class="asn-head">
+        <span class="badge asn-type {{ a.type }}">{{ a.type_label }}</span>
+        <span class="asn-summary">{{ a.summary }}</span>
+        {% if r.kind == 'complete' %}<span class="badge bg-success">Completed</span>{% endif %}
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('assignments_page', tab='sent') }}#{{ a.id }}">Open</a>
+      </div>
+      <div class="asn-msg mt-2"><span class="who">{{ r.by }}</span> <span class="when">{{ r.at|datetimeformat("%m/%d/%y %I:%M %p") }}</span>{% if r.text %}<br>{{ r.text }}{% endif %}</div>
+      <div class="asn-meta">{{ a.id }} &middot; to {{ a.assigned_to_name }}{% if a.location_name %} &middot; {{ a.location_name }}{% endif %}</div>
+    </div>
+    {% else %}
+    <div class="card-body text-muted">No responses yet. Replies and completions on what you send show up here.</div>
+    {% endfor %}
+
+  {% elif tab == 'new' %}
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('assignment_create') }}" id="asnForm" style="max-width:720px;">
+      {% set t0 = form.get('type') or ('cycle_count' if can_assign else 'custom') %}
+      <label class="form-label fw-semibold">Type</label>
+      <div class="btn-group asn-type-pick flex-wrap mb-1" role="group">
+        {% for key, label in types.items() %}
+          {% set allowed = can_assign or key == 'custom' %}
+          <input type="radio" class="btn-check" name="type" id="t_{{ key }}" value="{{ key }}" {{ 'checked' if key == t0 }} {{ 'disabled' if not allowed }}>
+          <label class="btn btn-outline-primary" for="t_{{ key }}" {% if not allowed %}title="Needs the Send Assignments permission"{% endif %}>{{ label }}</label>
+        {% endfor %}
+      </div>
+      {% if not can_assign %}<div class="text-muted small mb-3">You can send messages. Cycle counts, blends and receptions need the Send Assignments permission from an admin.</div>{% endif %}
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label class="form-label" for="asnUser">For *</label>
+          <select class="form-select" id="asnUser" name="assigned_to" required>
+            <option value="" selected disabled>Pick a person</option>
+            {% for u in users %}<option value="{{ u.id }}">{{ user_display_name(u) }}{% if user_display_name(u) != u.username %} ({{ u.username }}){% endif %}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="asnLoc">Location <span class="asn-loc-req">*</span></label>
+          <select class="form-select" id="asnLoc" name="location_id">
+            <option value="">—</option>
+            {% for l in locations %}<option value="{{ l.id }}">{{ l.name }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <!-- Cycle count -->
+      <fieldset class="asn-fs mt-3" data-type="cycle_count">
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="asnAll" name="all_products" value="1" checked>
+          <label class="form-check-label fw-semibold" for="asnAll">All products</label>
+        </div>
+        <div id="asnPick" hidden>
+          <input type="search" class="form-control form-control-sm mb-2" id="asnProdSearch" placeholder="Filter products…">
+          <div class="asn-products">
+            {% for p in products %}
+            <label data-name="{{ (p.name or '')|lower }}"><input type="checkbox" class="form-check-input me-1" name="product_ids" value="{{ p.id }}"> {{ p.name }}</label>
+            {% endfor %}
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Blend -->
+      <fieldset class="asn-fs mt-3" data-type="blend">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Blend *</label>
+            <select class="form-select" name="formula_id" required>
+              <option value="" selected disabled>Pick a formula</option>
+              {% for f in formulas %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Quantity *</label>
+            <input class="form-control" name="batch_qty" type="number" step="any" min="0" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Unit</label>
+            <select class="form-select" name="batch_unit"><option value="gal">GAL</option><option value="lb">LB</option></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Package type</label>
+            <select class="form-select" name="package_id">
+              <option value="">Bulk (no package)</option>
+              {% for pk in packages %}<option value="{{ pk.id }}">{{ pk.name }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Reception -->
+      <fieldset class="asn-fs mt-3" data-type="reception">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Product *</label>
+            <select class="form-select" name="product_id" required>
+              <option value="" selected disabled>Pick a product</option>
+              {% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Quantity</label>
+            <input class="form-control" name="qty" type="number" step="any" min="0">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Unit</label>
+            <select class="form-select" name="unit"><option value="gal">GAL</option><option value="lb">LB</option><option value="unit">UNIT</option></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Carrier *</label>
+            <input class="form-control" name="carrier" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Date *</label>
+            <input class="form-control" name="expected_date" type="date" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Time</label>
+            <input class="form-control" name="expected_time" type="time">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">PO #</label>
+            <input class="form-control" name="po_number">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">BOL #</label>
+            <input class="form-control" name="bol_number">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Message -->
+      <fieldset class="asn-fs mt-3" data-type="custom">
+        <label class="form-label">Message *</label>
+        <textarea class="form-control" name="message" rows="4" maxlength="2000" required></textarea>
+      </fieldset>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-4">
+          <label class="form-label">Due date</label>
+          <input class="form-control" name="due_date" type="date">
+        </div>
+        <div class="col-md-8 asn-note">
+          <label class="form-label">Note</label>
+          <input class="form-control" name="note" maxlength="1000" placeholder="Anything they should know">
+        </div>
+      </div>
+
+      <div class="mt-4 d-flex gap-2">
+        <button class="btn btn-primary">Send</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('assignments_page') }}">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  {% else %}
+    {% for a in mine %}{{ item(a, 'mine') }}{% else %}<div class="card-body text-muted">Nothing assigned to you.</div>{% endfor %}
+  {% endif %}
+</div>
+
+<!-- Mark complete -->
+<div class="modal fade" id="asnDone" tabindex="-1" aria-labelledby="asnDoneTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" method="POST" id="asnDoneForm">
+      <div class="modal-header">
+        <h5 class="modal-title" id="asnDoneTitle">Mark complete</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fw-semibold mb-2" id="asnDoneItem"></div>
+        <label class="form-label" for="asnDoneNote">Note <span class="text-muted">(optional)</span></label>
+        <textarea class="form-control" id="asnDoneNote" name="note" rows="3" maxlength="2000"
+                  placeholder="Counts are in, short 2 drums, etc."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-success">Complete</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Keep the badge on the home page / toolbar behind this window in step
+  try {
+    window.top.document.querySelectorAll("[data-asn-badge]").forEach(function (b) {
+      b.textContent = "{{ my_open_assignments }}";
+      b.hidden = {{ 'true' if not my_open_assignments else 'false' }};
+    });
+  } catch (e) {}
+
+  document.querySelectorAll(".asn-complete").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.getElementById("asnDoneForm").action = btn.dataset.url;
+      document.getElementById("asnDoneItem").textContent = btn.dataset.id + " — " + btn.dataset.summary;
+      bootstrap.Modal.getOrCreateInstance(document.getElementById("asnDone")).show();
+    });
+  });
+
+  const form = document.getElementById("asnForm");
+  if (!form) return;
+  // Only the chosen type's fields are sent (and required)
+  function showType() {
+    const t = (form.querySelector('input[name="type"]:checked') || {}).value;
+    form.querySelectorAll(".asn-fs").forEach(function (fs) {
+      const on = fs.dataset.type === t;
+      fs.hidden = !on; fs.disabled = !on;
+    });
+    const custom = t === "custom";
+    document.getElementById("asnLoc").required = !custom;
+    document.querySelector(".asn-loc-req").hidden = custom;
+    form.querySelector(".asn-note").hidden = custom;
+  }
+  form.querySelectorAll('input[name="type"]').forEach(r => r.addEventListener("change", showType));
+  showType();
+
+  const all = document.getElementById("asnAll"), pick = document.getElementById("asnPick");
+  all.addEventListener("change", function () { pick.hidden = all.checked; });
+  document.getElementById("asnProdSearch").addEventListener("input", function (e) {
+    const q = e.target.value.trim().toLowerCase();
+    pick.querySelectorAll("label").forEach(l => { l.hidden = q && !l.dataset.name.includes(q); });
+  });
+})();
+</script>
+{% endblock %}

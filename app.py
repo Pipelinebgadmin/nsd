@@ -1,3 +1,4 @@
+import html
 import os
 import json
 import re
@@ -44,6 +45,7 @@ TANK_LEDGER_PATH = os.path.join(DATA_DIR, "tank_ledger.json")
 EVENT_LEDGER_PATH = os.path.join(DATA_DIR, "event_ledger.json")
 PURCHASING_PATH = os.path.join(DATA_DIR, "purchasing.json")    # one record per receipt (PO/BOL, vendor, price)
 BLEND_COSTS_PATH = os.path.join(DATA_DIR, "blend_costs.json")  # what each blend batch was made from, for re-costing
+ASSIGNMENTS_PATH = os.path.join(DATA_DIR, "assignments.json")   # tasks and messages sent to people
 
 TANK_CAPACITY_UNIT = "gal"  # capacity is always gallons
 
@@ -340,6 +342,7 @@ FEATURES = [
     ("spreadsheet",      "Spreadsheet",           "Use the spreadsheet"),
     ("reports",          "Reports",               "View and print reports"),
     ("purchasing",       "Purchasing",            "Enter the vendor and price for received loads (this is where inventory cost comes from)"),
+    ("assignments",      "Send Assignments",      "Assign cycle counts, blends and receptions to people (everyone can send messages and answer their own)"),
     ("costs",            "Costs & Values",        "See unit costs, inventory value, cost of goods, and blend/formula costs"),
     ("ledger",           "Event Ledger",          "View the audit ledger (still needs the ledger password)"),
 ]
@@ -347,7 +350,7 @@ FEATURE_KEYS = [f[0] for f in FEATURES]
 # New users start with everything except the ledger; the admin adjusts from there.
 # Quick Build and the ledger are opt-in: an admin turns them on per user.
 # Quick Build, the ledger, and money (Costs & Values) are opt-in: an admin turns them on per user.
-DEFAULT_FEATURES = [k for k in FEATURE_KEYS if k not in ("ledger", "blend_builder", "costs", "purchasing")]
+DEFAULT_FEATURES = [k for k in FEATURE_KEYS if k not in ("ledger", "blend_builder", "costs", "purchasing", "assignments")]
 
 # Which feature(s) unlock each page. A user needs ANY one of the listed features.
 # Pages shared by several screens (like the inventory API) list every screen that uses them.
@@ -362,6 +365,7 @@ ENDPOINT_FEATURES = {
     "list_products": {"products"},
     "product_detail": {"products"},
     "add_product": {"products_edit"},
+    "api_products_similar": {"products_edit"},
     "delete_product": {"products_edit"},
     "inventory_adjust_page": {"adjust_inventory"},
     "inventory_add_page": {"adjust_inventory"},
@@ -471,9 +475,15 @@ def can_see_costs() -> bool:
 
 
 # Every logged-in user can reach these.
-ALWAYS_ALLOWED = {"index", "home", "logout", "users_page", "user_profile"}
+ALWAYS_ALLOWED = {"index", "home", "logout", "users_page", "user_profile",
+                  # everyone gets and answers assignments; the routes check who may do what
+                  "assignments_page", "assignment_create", "assignment_reply", "assignment_complete",
+                  "assignment_cancel", "assignment_pdf",
+                  # master search: every result is checked against the user's permissions
+                  "search_page", "api_search"}
 # Only admins, regardless of features.
-ADMIN_ONLY = {"admin_page", "admin_sheet_access", "admin_ledger_password", "admin_user_can_undo"}
+ADMIN_ONLY = {"admin_page", "admin_sheet_access", "admin_ledger_password", "admin_user_can_undo",
+              "find_replace_page"}
 
 
 def normalize_user(u: dict) -> dict:
@@ -3034,6 +3044,108 @@ def plan_formula_requirements(products: list, formula: dict, batch_qty: float, b
     return rows
 
 
+def plan_pull(needed_gal, stock, max_nodes=200000):
+    """The most efficient way to pull one ingredient, in the shape the Blend screen takes.
+
+    stock is location_stock_for_product(). Priority, most important first:
+      1. use what's already open: loose/partial stock, then one tank
+      2. open as few packages as possible (full ones emptied + the one opened)
+      3. leave as little as possible in the package that gets opened
+    Returns {partial_gal, tank, full: [...], open, short_gal, steps: [text, ...]}.
+    """
+    tol = BLEND_TOLERANCE_GAL
+    left = max(0.0, float(needed_gal or 0.0))
+    plan = {"partial_gal": 0.0, "tank": None, "full": [], "open": None, "short_gal": 0.0, "steps": []}
+    if left <= tol:
+        return plan
+
+    # 1a. loose / partial stock
+    partial = min(float(stock.get("unpackaged_gal") or 0.0), left)
+    if partial > tol:
+        plan["partial_gal"] = round(partial, 3)
+        left -= partial
+
+    # 1b. one tank (the Blend screen takes one per ingredient): the smallest that covers
+    #     what's left, so tanks get emptied; otherwise the fullest
+    tanks = [t for t in stock.get("tanks") or [] if float(t.get("fill_gal") or 0) > tol]
+    if left > tol and tanks:
+        covering = [t for t in tanks if float(t["fill_gal"]) + tol >= left]
+        t = min(covering, key=lambda t: float(t["fill_gal"])) if covering else max(tanks, key=lambda t: float(t["fill_gal"]))
+        take = min(float(t["fill_gal"]), left)
+        plan["tank"] = {"tank_id": t["tank_id"], "name": t["name"], "gal": round(take, 3)}
+        left -= take
+
+    # 2-3. packages: try every count of each size (biggest first), keep the best
+    pkgs = sorted([p for p in stock.get("packages") or [] if float(p.get("volume_gal") or 0) > 0
+                   and int(p.get("quantity") or 0) > 0], key=lambda p: -float(p["volume_gal"]))
+    best = {"key": None}
+    nodes = [0]
+
+    def finish(counts, rem):
+        counts, opened, short = list(counts), None, 0.0
+        if rem > tol:  # open one more package for the rest: the one that leaves least behind
+            fits = [(float(p["volume_gal"]) - rem, i) for i, p in enumerate(pkgs)
+                    if float(p["volume_gal"]) + tol >= rem and counts[i] < int(p["quantity"])]
+            if not fits:
+                short = rem
+            else:
+                waste, i = min(fits)
+                if waste <= tol:  # it empties exactly: that's just one more full package
+                    counts[i] += 1
+                else:
+                    opened = (i, rem, waste)
+        touched = sum(counts) + (1 if opened else 0)
+        key = (round(short, 3), touched, round(opened[2], 3) if opened else 0.0)
+        if best["key"] is None or key < best["key"]:
+            best.update(key=key, counts=counts, opened=opened, short=short)
+
+    def dfs(i, counts, rem):
+        nodes[0] += 1
+        if nodes[0] > max_nodes:
+            return
+        if best["key"] is not None and best["key"][0] == 0 and sum(counts) >= best["key"][1]:
+            return  # can't beat a complete plan that touches fewer packages
+        if i == len(pkgs) or rem <= tol:
+            finish(counts + [0] * (len(pkgs) - len(counts)), rem)
+            return
+        vol, have = float(pkgs[i]["volume_gal"]), int(pkgs[i]["quantity"])
+        for n in range(min(have, int((rem + tol) // vol)), -1, -1):
+            dfs(i + 1, counts + [n], rem - n * vol)
+
+    if left > tol:
+        if pkgs:
+            dfs(0, [], left)
+            for i, n in enumerate(best["counts"]):
+                if n:
+                    p = pkgs[i]
+                    plan["full"].append({"package_id": p["package_id"], "package_name": p["package_name"],
+                                         "qty": n, "volume_gal": float(p["volume_gal"])})
+            if best["opened"]:
+                i, gal, waste = best["opened"]
+                p = pkgs[i]
+                plan["open"] = {"package_id": p["package_id"], "package_name": p["package_name"],
+                                "volume_gal": float(p["volume_gal"]), "gal_out": round(gal, 3),
+                                "left_in_it": round(waste, 3)}
+            plan["short_gal"] = round(best["short"], 3)
+        else:
+            plan["short_gal"] = round(left, 3)
+
+    g = lambda x: f"{x:,.3f}".rstrip("0").rstrip(".")
+    if plan["partial_gal"]:
+        plan["steps"].append(f"{g(plan['partial_gal'])} gal from loose/partial stock")
+    if plan["tank"]:
+        plan["steps"].append(f"{g(plan['tank']['gal'])} gal from tank {plan['tank']['name']}")
+    for f in plan["full"]:
+        plan["steps"].append(f"{f['qty']} × full {f['package_name']} ({g(f['volume_gal'])} gal each)")
+    if plan["open"]:
+        o = plan["open"]
+        plan["steps"].append(f"open 1 {o['package_name']}, pull {g(o['gal_out'])} gal "
+                             f"({g(o['left_in_it'])} gal stays in it)")
+    if plan["short_gal"]:
+        plan["steps"].append(f"SHORT {g(plan['short_gal'])} gal: not enough on hand here")
+    return plan
+
+
 def _parse_sourcing(form, product_id: str) -> dict:
     """Read one component's sourcing inputs from the submitted form."""
     def num(name):
@@ -4536,6 +4648,9 @@ def add_product():
             except ValueError:
                 errors.append("Package size (gal) must be a number when provided.")
 
+        if name and any(_name_key(p.get("name")) == _name_key(name) for p in load_products()):
+            errors.append(f"There's already a product named '{name}'.")
+
         if errors:
             return render_template(
                 "add_product.html",
@@ -4544,6 +4659,12 @@ def add_product():
                 form=request.form,
                 locations=locations,  # ✅
             )
+
+        # 80%+ like an existing name: ask first (the page's pop-up normally does this before submitting)
+        similar = similar_products(name)
+        if similar and request.form.get("confirm_similar") != "1":
+            return render_template("add_product.html", app_title=APP_TITLE, errors=None,
+                                   form=request.form, locations=locations, similar=similar)
 
         products = load_products()
         new_id = generate_next_product_id(products)
@@ -4941,11 +5062,24 @@ def product_detail(product_id):
             )
 
 
+        # A new name goes through rename_everywhere (below) so history keeps up
+        old_name = prod.get("name") or ""
+        renaming = name != old_name
+        if renaming:
+            _, rename_errors, _ = preview_renames([{"kind": "product", "id": prod.get("id"), "old": old_name, "new": name}])
+            if rename_errors:
+                return render_template("edit_product.html", app_title=APP_TITLE, errors=rename_errors,
+                                       p=prod, form=request.form, location_rows=location_rows)
+            similar = similar_products(name, exclude_id=prod.get("id"))
+            if similar and request.form.get("confirm_similar") != "1":
+                return render_template("edit_product.html", app_title=APP_TITLE, errors=None, p=prod,
+                                       form=request.form, location_rows=location_rows, similar=similar)
+
         # Only the product's details change here. Stock (FIFO layers) is left
         # exactly as it is; it only moves through Receive/Remove/Move/Blend.
         prod.update(
             {
-                "name": name,
+                "name": old_name,
                 "cas": cas,
                 "phase": phase,
                 "default_unit": unit_to_display(default_unit),  # 🔥 store ALL CAPS
@@ -4964,6 +5098,8 @@ def product_detail(product_id):
 
         products[idx] = prod
         save_products(products)
+        if renaming:
+            rename_everywhere([{"kind": "product", "id": prod.get("id"), "old": old_name, "new": name}])
         return redirect(url_for("list_products"))
 
     prod["default_unit"] = normalize_unit(prod.get("default_unit"))
@@ -6742,7 +6878,7 @@ def api_blend_plan():
     for r in rows:
         stock = location_stock_for_product(r["product"], loc["id"], loc["name"])
         out.append({"product_id": r["product_id"], "name": r["name"], "percent": r["percent"],
-                    "needed_gal": r["needed_gal"], **stock})
+                    "needed_gal": r["needed_gal"], **stock, "pull": plan_pull(r["needed_gal"], stock)})
     blend_name_lc = (formula.get("name") or "").strip().lower()
     blend_pid = next((str(p.get("id")) for p in products if (p.get("name") or "").strip().lower() == blend_name_lc), None)
     out_tanks = [{"id": t["id"], "name": t["name"], "free_gal": t["free_gal"], "fill_gal": t["fill_gal"],
@@ -7327,6 +7463,7 @@ def purchasing_page():
     vendors = {(v.get("name") or "").strip() for v in load_json(os.path.join(DATA_DIR, "vendors.json"), [])}
     vendors |= {(r.get("vendor") or "").strip() for r in load_purchasing()}
     return render_template("purchasing.html", app_title=APP_TITLE, show=show, counts=counts,
+                           q=request.args.get("q", ""),
                            receipts=[_receipt_view(r) for r in receipts],
                            vendors=sorted(v for v in vendors if v))
 
@@ -7514,8 +7651,14 @@ def formulas_update_percent(formula_id):
         flash(f"Percents must sum to 100%. Current total: {total_pct:.3f}%.", "danger")
         return redirect(url_for("formulas_info_page", formula_id=formula_id))
 
-    # update record
-    f["name"] = name
+    # update record (a new name goes through rename_everywhere below, with its blend product)
+    old_name = f.get("name") or ""
+    if name != old_name:
+        _, rename_errors, _ = preview_renames([{"kind": "formula", "id": formula_id, "old": old_name, "new": name}])
+        if rename_errors:
+            for e in rename_errors:
+                flash(e, "danger")
+            return redirect(url_for("formulas_info_page", formula_id=formula_id))
     f["description"] = description
     f["mode"] = "percent"
     f["defaults"] = {
@@ -7526,6 +7669,8 @@ def formulas_update_percent(formula_id):
     f["updated_at"] = now_central_iso()
 
     save_formulas(formulas)
+    if name != old_name:
+        rename_everywhere([{"kind": "formula", "id": formula_id, "old": old_name, "new": name}])
 
     flash("Formula updated.", "success")
     return redirect(url_for("formulas_info_page", formula_id=formula_id))
@@ -8056,13 +8201,18 @@ def edit_location(location_id):
             form=request.form.to_dict()
         )
 
-    # Update location record (inventory untouched)
-    loc["name"] = name
+    # Update location record. A new name goes through rename_everywhere, because
+    # stock is tied to a location by its name.
+    old_name = loc.get("name") or ""
     loc["address"] = address
     loc["updated_at"] = now_central_iso()
 
     save_locations(locations)
     save_tanks(tanks)
+    if name != old_name:
+        _, rename_errors = rename_everywhere([{"kind": "location", "id": location_id, "old": old_name, "new": name}])
+        for e in rename_errors:
+            flash(e, "danger")
 
     flash("Location updated.", "success")
     return redirect(url_for("location_detail_by_id", location_id=location_id))
@@ -8996,6 +9146,9 @@ def build_blend_instruction_report(formula, batch_qty, batch_unit, location_id=N
                 warnings.append(f"{name}: can't compare need vs. on-hand (missing weight or package size).")
                 continue
             row["status"] = "SHORT" if (row["short_gal"] or row["short_lb"]) else "OK"
+        # What to pull it from at the blend location
+        if loc and batch_qty > 0 and row["need_gal"]:
+            row["pull"] = plan_pull(row["need_gal"], location_stock_for_product(prod, loc["id"], loc_name))
 
     total_pct = sum(r["percent"] for r in rows)
     sum_gal = sum(r["need_gal"] for r in rows) if all(r["need_gal"] is not None for r in rows) else None
@@ -9029,7 +9182,7 @@ def _bi_num(v, d=2):
     return "—" if v is None else f"{v:,.{d}f}"
 
 
-def pdf_blend_instruction(rep):
+def pdf_blend_instruction(rep, extra_lines=None):
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     from reportlab.lib import colors
@@ -9052,7 +9205,7 @@ def pdf_blend_instruction(rep):
         f"<b>Percentages are {basis_txt}</b>",
         f"<b>Date:</b> {rep['printed_at']} &nbsp;&nbsp; <b>Printed by:</b> {rep['printed_by']}"
         f" &nbsp;&nbsp; <i>Inventory is live as of this time.</i>",
-    ])
+    ] + list(extra_lines or []))
 
     for w in rep["warnings"]:
         elements.append(Paragraph("WARNING: " + w, styles["Warn"]))
@@ -9111,6 +9264,30 @@ def pdf_blend_instruction(rep):
     t.setStyle(TableStyle(style))
     elements.append(t)
 
+    # What to pull each ingredient from at the blend location (plan_pull)
+    pulls = [r for r in rep["rows"] if r.get("pull")]
+    if pulls:
+        elements.append(Paragraph(f"Pull from — at {html.escape(at)}", styles["SectionHeading"]))
+        pdata = [[Paragraph("Component", hdr), Paragraph("Need<br/>(gal)", hdr_r), Paragraph("Pull from", hdr),
+                  Paragraph("Done<br/>(initials)", hdr)]]
+        for r in pulls:
+            steps = r["pull"]["steps"] or ["nothing needed"]
+            text = "<br/>".join(("<font color='#b91c1c'><b>" + html.escape(x) + "</b></font>") if x.startswith("SHORT")
+                                else "• " + html.escape(x) for x in steps)
+            pdata.append([Paragraph(html.escape(r["name"]), cell), _bi_num(r["need_gal"]), Paragraph(text, cell), ""])
+        pt = Table(pdata, colWidths=[150, 60, 430, 80], repeatRows=1)
+        pt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6f8")]),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d9dee3")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(pt)
+        elements.append(Paragraph("Loose/partial stock and tanks first, then as few packages as possible, "
+                                  "leaving the least behind in the one that gets opened.", styles["ReportSubtitle"]))
+
     elements.append(Spacer(1, 8))
     elements.append(Paragraph(
         "Gal/lbs conversions use each component's own weight per gallon. Totals: percentages must equal 100% and "
@@ -9129,14 +9306,14 @@ def pdf_blend_instruction(rep):
     return buf
 
 
-def pdf_cycle_count(rows, location):
+def pdf_cycle_count(rows, location, extra_lines=None):
     def build(elements):
         styles = _get_report_styles()
         _pdf_header(elements, styles, "Inventory Cycle Count Sheet", [
             _report_scope_line(location, None, None),
             f"Generated {now_central_str()}",
             "System quantities are intentionally left off — count blind, then compare.",
-        ])
+        ] + list(extra_lines or []))
         table_rows = [["Product", "Location", "Counted Qty", "Unit", "Counted By"]]
         for r in rows:
             table_rows.append([r["product_name"], r["location"], "______________", r["default_unit"], "______________"])
@@ -9317,6 +9494,862 @@ def report_cycle_count_pdf():
     rows = build_cycle_count_sheet(location, count)
     buf = pdf_cycle_count(rows, location)
     return _pdf_response(buf, "cycle_count_sheet.pdf")
+
+
+# -------------------------
+# Master search (toolbar): anything in the system the user is allowed to see
+# -------------------------
+# Every group checks the same feature the page it links to needs, and records
+# tied to a location the user isn't assigned to are left out. No money is shown.
+SEARCH_PAGES = [
+    # (endpoint, label, extra words people might type)
+    ("home", "Home", "start main"),
+    ("transactions_page", "Transaction History", "history movements undo log"),
+    ("inventory_overview", "Inventory Overview", "stock on hand"),
+    ("live_inventory_page", "Live Inventory", "stock per location"),
+    ("inventory_adjust_page", "Adjust Inventory", "receive remove move repackage"),
+    ("list_products", "Products", "catalog items chemicals"),
+    ("add_product", "Add Product", "new product create"),
+    ("alerts_page", "Reorder Alerts", "low stock threshold"),
+    ("blend_new_page", "Blend", "make blend execute"),
+    ("blend_log_page", "Blend Log", "blends made history"),
+    ("formulas_page", "Formula Catalog", "recipes formulas"),
+    ("locations_page", "Locations", "sites yards tanks"),
+    ("staging_page", "Staging", "sold pickup orders customers"),
+    ("purchasing_page", "Purchasing", "price vendor receipts po bol cost"),
+    ("assignments_page", "Assignments", "tasks messages cycle count"),
+    ("reports_center", "Reports", "pdf print"),
+    ("report_inventory_value", "Total Inventory Value report", "value money"),
+    ("report_avg_cost", "Avg Cost of Goods report", "cost cogs"),
+    ("report_inventory_listing", "Total Inventory report", "listing on hand"),
+    ("report_blend_cost", "Blend Cost report", "formula cost"),
+    ("report_blend_instruction", "Blend Instruction report", "recipe print"),
+    ("report_cycle_count", "Cycle Count sheet", "count sheet"),
+    ("packages_page", "Packages", "drums totes package types"),
+    ("find_replace_page", "Find & Replace", "rename names"),
+    ("admin_page", "Admin", "users permissions settings"),
+]
+
+
+def _search_terms(q):
+    return [t for t in re.split(r"\s+", (q or "").strip().lower()) if t]
+
+
+def _matches(terms, *fields):
+    hay = " ".join(str(f) for f in fields if f not in (None, "")).lower()
+    return all(t in hay for t in terms)
+
+
+def _fmt_num(v):
+    try:
+        return f"{float(v):,.2f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return ""
+
+
+def search_everything(user, q, per_group=8):
+    """[{group, items: [{title, sub, url}], more}] for everything matching q that user may see."""
+    terms = _search_terms(q)
+    if not terms:
+        return []
+    allowed_page = lambda ep: endpoint_allowed(user, ep)
+    loc_ok = lambda name=None, lid=None: user_can_use_location(user, loc_id=lid, loc_name=name)
+    groups = []
+
+    def add(label, items, by_name=True):
+        """by_name: names starting with what was typed first; otherwise keep the order given (newest first)."""
+        if not items:
+            return
+        if by_name:
+            items.sort(key=lambda it: (not it["title"].lower().startswith(terms[0]), it["title"].lower()))
+        groups.append({"group": label, "items": items[:per_group], "more": max(0, len(items) - per_group)})
+
+    # Pages
+    add("Pages", [{"title": label, "sub": "Open page", "url": url_for(ep)}
+                  for ep, label, words in SEARCH_PAGES
+                  if ep in app.view_functions and allowed_page(ep) and _matches(terms, label, words)])
+
+    # Products (stock shown only at the user's own locations)
+    if allowed_page("list_products") or allowed_page("inventory_overview"):
+        items = []
+        for p in load_products():
+            if not _matches(terms, p.get("name"), p.get("id"), p.get("cas"), p.get("supplier"), p.get("package_type")):
+                continue
+            qty = sum(float(l.get("qty") or 0) for l in p.get("layers") or [] if loc_ok(name=l.get("location")))
+            bits = [f"{_fmt_num(qty)} {p.get('default_unit') or ''} on hand".strip()]
+            if p.get("cas"):
+                bits.append(f"CAS {p['cas']}")
+            if p.get("supplier"):
+                bits.append(p["supplier"])
+            url = url_for("product_detail", product_id=p.get("id")) if allowed_page("product_detail") \
+                else url_for("inventory_overview")
+            items.append({"title": p.get("name") or p.get("id"), "sub": " · ".join(bits), "url": url})
+        add("Products", items)
+
+    # Locations and tanks
+    if allowed_page("locations_page"):
+        locs = [l for l in load_locations() if loc_ok(lid=l.get("id"))]
+        add("Locations", [{"title": l.get("name"), "sub": l.get("address") or "Location",
+                           "url": url_for("location_detail_by_id", location_id=l.get("id"))}
+                          for l in locs if _matches(terms, l.get("name"), l.get("address"))])
+        by_id = {str(l.get("id")): l for l in locs}
+        add("Tanks", [{"title": t.get("name"), "sub": f"{by_id[str(t.get('location_id'))].get('name')} · "
+                                                      f"{_fmt_num(t.get('capacity_gal'))} gal capacity",
+                       "url": url_for("location_detail_by_id", location_id=t.get("location_id"))}
+                      for t in load_tanks() if str(t.get("location_id")) in by_id and t.get("is_active", True)
+                      and _matches(terms, t.get("name"), by_id[str(t.get("location_id"))].get("name"))])
+
+    # Formulas
+    if allowed_page("formulas_page"):
+        by_id = {str(p.get("id")): p.get("name") for p in load_products()}
+        add("Formulas", [{"title": f.get("name"), "sub": ", ".join(
+                              f"{by_id.get(str(c.get('product_id')), '?')} {_fmt_num(c.get('percent'))}%"
+                              for c in f.get("components") or []),
+                          "url": url_for("formulas_info_page", formula_id=f.get("id"))}
+                         for f in load_formulas()
+                         if _matches(terms, f.get("name"), f.get("description"),
+                                     *[by_id.get(str(c.get("product_id"))) for c in f.get("components") or []])])
+
+    newest = lambda it: it.get("_ts") or ""
+
+    # Transaction history
+    if allowed_page("transactions_page"):
+        items = []
+        for t in load_transactions():
+            sm = t.get("summary") or {}
+            if not all(loc_ok(name=l) for l in sm.get("locations") or []):
+                continue
+            if _matches(terms, t.get("id"), t.get("action"), t.get("user"), sm.get("product"), sm.get("location"),
+                        t.get("reason"), str(t.get("ts") or "")[:10]):
+                qty = f"{_fmt_num(sm.get('qty_gal'))} gal" if sm.get("qty_gal") is not None else ""
+                items.append({"title": f"{t.get('id')} · {t.get('action')}", "_ts": t.get("ts"),
+                              "sub": " · ".join(x for x in (sm.get("product"), qty, sm.get("location"),
+                                                             t.get("user"), str(t.get("ts") or "")[:10]) if x),
+                              "url": url_for("transactions_page") + f"#{t.get('id')}"})
+        items.sort(key=newest, reverse=True)
+        add("Transactions", items, by_name=False)
+
+    # Blend Log
+    if allowed_page("blend_log_page"):
+        items = []
+        for b in load_blends():
+            if not loc_ok(name=b.get("location"), lid=b.get("location_id")):
+                continue
+            comps = [c.get("name") for c in b.get("components") or []]
+            if _matches(terms, f"#{b.get('number')}", b.get("blend"), b.get("location"), b.get("by"),
+                        b.get("notes"), str(b.get("date") or "")[:10], *comps):
+                items.append({"title": f"Blend #{b.get('number')} · {b.get('blend')}", "_ts": b.get("date"),
+                              "sub": " · ".join(x for x in (f"{_fmt_num(b.get('total_gal'))} gal", b.get("location"),
+                                                             b.get("by"), str(b.get("date") or "")[:10]) if x),
+                              "url": url_for("blend_log_page", highlight=b.get("number"))})
+        items.sort(key=newest, reverse=True)
+        add("Blend Log", items, by_name=False)
+
+    # Purchasing receipts
+    if allowed_page("purchasing_page"):
+        items = []
+        for r in load_purchasing():
+            if r.get("status") == "undone" or not loc_ok(name=r.get("location"), lid=r.get("location_id")):
+                continue
+            if _matches(terms, r.get("id"), r.get("po_number"), r.get("bol_number"), r.get("vendor"),
+                        r.get("product_name"), r.get("location"), str(r.get("received_at") or "")[:10]):
+                ids = " / ".join(x for x in (r.get("po_number") and f"PO {r['po_number']}",
+                                             r.get("bol_number") and f"BOL {r['bol_number']}") if x)
+                items.append({"title": f"{r.get('id')} · {r.get('product_name')}", "_ts": r.get("received_at"),
+                              "sub": " · ".join(x for x in (ids, f"{_fmt_num(r.get('qty'))} {str(r.get('unit') or '').upper()}",
+                                                             r.get("vendor") or "unpriced", r.get("location")) if x),
+                              "url": url_for("purchasing_page", show="all", q=r.get("id"))})
+        items.sort(key=newest, reverse=True)
+        add("Receipts", items, by_name=False)
+
+    # Staging
+    if allowed_page("staging_page"):
+        items = []
+        for r in load_staging():
+            if not loc_ok(name=r.get("location_name"), lid=r.get("location_id")):
+                continue
+            if _matches(terms, r.get("id"), r.get("customer"), r.get("product_name"), r.get("location_name"),
+                        r.get("status"), r.get("notes"), r.get("scheduled_date")):
+                items.append({"title": f"{r.get('customer') or 'Staged order'} · {r.get('product_name')}",
+                              "_ts": r.get("staged_at"),
+                              "sub": " · ".join(x for x in (f"{_fmt_num(r.get('entered_qty') or r.get('qty_default'))} "
+                                                             f"{str(r.get('entered_unit') or r.get('default_unit') or '').upper()}",
+                                                             r.get("status"), r.get("scheduled_date")) if x),
+                              "url": url_for("staging_page")})
+        items.sort(key=newest, reverse=True)
+        add("Staging", items, by_name=False)
+
+    # Assignments: only the person's own (sent or received); admins see all
+    items = []
+    for a in load_assignments():
+        if not _assignment_can_see(a, user):
+            continue
+        summary = _assignment_summary(a)
+        if _matches(terms, a.get("id"), ASSIGNMENT_TYPES.get(a.get("type")), summary, a.get("note"),
+                    a.get("assigned_to_name"), a.get("created_by_name"), a.get("location_name"), a.get("status")):
+            tab = "mine" if a.get("assigned_to") == user.get("id") else "sent"
+            items.append({"title": f"{a.get('id')} · {ASSIGNMENT_TYPES.get(a.get('type'), 'Task')}", "_ts": a.get("created_at"),
+                          "sub": " · ".join(x for x in (summary[:80], f"to {a.get('assigned_to_name')}", a.get("status")) if x),
+                          "url": url_for("assignments_page", tab=tab) + f"#{a.get('id')}"})
+    items.sort(key=newest, reverse=True)
+    add("Assignments", items, by_name=False)
+
+    # Packages
+    if allowed_page("packages_page"):
+        add("Packages", [{"title": pk.get("name"), "sub": f"{_fmt_num(pk.get('volume'))} {str(pk.get('unit') or '').upper()}",
+                          "url": url_for("packages_page")}
+                         for pk in load_packages() if _matches(terms, pk.get("name"), pk.get("id"))])
+
+    # Users (admins)
+    if user.get("role") == "admin":
+        add("Users", [{"title": user_display_name(normalize_user(u)), "sub": " · ".join(
+                           x for x in (u.get("username"), u.get("email"), u.get("role")) if x),
+                       "url": url_for("admin_page")}
+                      for u in load_users() if _matches(terms, u.get("username"), u.get("first_name"),
+                                                        u.get("last_name"), u.get("email"), u.get("phone"))])
+
+    for g in groups:
+        for it in g["items"]:
+            it.pop("_ts", None)
+    return groups
+
+
+@app.get("/api/search")
+def api_search():
+    return jsonify({"q": request.args.get("q", ""), "groups": search_everything(current_user(), request.args.get("q"))})
+
+
+@app.get("/search/everything")  # /search is the older product jump used on Inventory Overview
+def search_page():
+    q = request.args.get("q", "")
+    return render_template("search.html", app_title=APP_TITLE, q=q,
+                           groups=search_everything(current_user(), q, per_group=100))
+
+
+# -------------------------
+# Rename: change a product, location or formula name everywhere
+# -------------------------
+# Names are copied into history (transactions, Blend Log, receipts, staging,
+# assignments) and stock is tied to a location by its name, so a rename has to
+# reach every copy, as if it had always been the new name. The event ledger is
+# the exception: it's hash-chained, so it keeps its old entries and gets a
+# "renamed" entry instead.
+RENAME_KINDS = {"product": "Product", "location": "Location", "formula": "Formula"}
+LOCATION_KEYS = ("location", "location_name", "from_location", "to_location")
+
+
+def _rename_files():
+    """Every data file a name can be copied into: {path: loaded data}."""
+    return {
+        DATA_PATH: load_products(), FORMULAS_PATH: load_formulas(), LOCATIONS_PATH: load_locations(),
+        BLENDS_PATH: load_blends(), PURCHASING_PATH: load_purchasing(), STAGING_PATH: load_staging(),
+        TRANSACTIONS_PATH: load_transactions(), ASSIGNMENTS_PATH: load_assignments(),
+        PACKAGE_INVENTORY_PATH: load_package_inventory(),
+    }
+
+
+def _name_owner(kind, name, data, skip_ids=()):
+    """The record of this kind already using this name (case-insensitive), or None."""
+    path = {"product": DATA_PATH, "formula": FORMULAS_PATH, "location": LOCATIONS_PATH}[kind]
+    key = name.strip().lower()
+    return next((r for r in data[path] if (r.get("name") or "").strip().lower() == key
+                 and str(r.get("id")) not in skip_ids), None)
+
+
+def plan_renames(changes, data):
+    """Check renames and add linked ones. Returns (changes, errors).
+
+    A blend product and its formula share a name (that's how a blend finds its
+    product), so renaming either one renames the other too.
+    """
+    out, errors, seen = [], [], set()
+    for c in changes:
+        c = {**c, "id": str(c["id"]), "new": (c.get("new") or "").strip()}
+        if not c["new"]:
+            errors.append(f"{RENAME_KINDS[c['kind']]} '{c['old']}': the new name is blank.")
+            continue
+        if c["new"] == c["old"]:
+            continue
+        out.append(c)
+        if c["kind"] in ("product", "formula"):
+            other = "formula" if c["kind"] == "product" else "product"
+            twin = _name_owner(other, c["old"], data)
+            if twin and not any(x["kind"] == other and str(x["id"]) == str(twin.get("id")) for x in changes):
+                out.append({"kind": other, "id": str(twin.get("id")), "old": twin.get("name"), "new": c["new"],
+                            "linked": True})
+    for c in out:
+        key = (c["kind"], c["id"])
+        if key in seen:
+            errors.append(f"{c['old']} is being renamed twice.")
+        seen.add(key)
+        taken = _name_owner(c["kind"], c["new"], data, skip_ids={c["id"]})
+        # fine if that name is itself being renamed away in this same batch
+        if taken and not any(x["kind"] == c["kind"] and x["id"] == str(taken.get("id")) for x in out):
+            errors.append(f"There's already a {c['kind']} named '{taken.get('name')}'.")
+    news = [(c["kind"], c["new"].lower()) for c in out]
+    if len(news) != len(set(news)):
+        errors.append("Two of these would end up with the same name.")
+    return out, errors
+
+
+def _swap_joined(text, old, new, seps):
+    """Replace old in a list-like display string ('A, B' or 'A → B')."""
+    if text.strip().lower() == old.lower():  # the whole string (a name may itself contain ", ")
+        return new
+    for sep in seps:
+        if sep in text:
+            return sep.join(new if part.strip().lower() == old.lower() else part for part in text.split(sep))
+    return new if text.strip().lower() == old.lower() else text
+
+
+def apply_renames(changes, data):
+    """Rename in place across data (from _rename_files). Returns {path: records changed}."""
+    counts = {}
+    home = {"product": DATA_PATH, "formula": FORMULAS_PATH, "location": LOCATIONS_PATH}
+
+    def walk(path, node, fn):
+        if isinstance(node, dict):
+            if fn(node):
+                counts[path] = counts.get(path, 0) + 1
+            for v in node.values():
+                walk(path, v, fn)
+        elif isinstance(node, list):
+            for v in node:
+                walk(path, v, fn)
+
+    for c in changes:
+        old, new, cid = c["old"], c["new"], c["id"]
+
+        def same(v):
+            return isinstance(v, str) and v.strip().lower() == old.strip().lower()
+
+        # the record itself
+        for rec in data[home[c["kind"]]]:
+            if str(rec.get("id")) == cid:
+                rec["name"] = new
+                counts[home[c["kind"]]] = counts.get(home[c["kind"]], 0) + 1
+
+        # every copy of the name
+        if c["kind"] == "product":
+            def fix(d):
+                changed = False
+                if str(d.get("product_id")) == cid:
+                    for k in ("product_name", "name"):                   # copies next to its id
+                        if same(d.get(k)):
+                            d[k] = new; changed = True
+                if str(d.get("blend_product_id")) == cid and same(d.get("blend")):
+                    d["blend"] = new; changed = True                      # Blend Log entry
+                ids = [str(i) for i in d.get("product_ids") or []] if isinstance(d.get("product_ids"), list) else []
+                if cid in ids:
+                    if isinstance(d.get("product"), str):                 # transaction summary
+                        swapped = _swap_joined(d["product"], old, new, (", ",))
+                        changed |= swapped != d["product"]; d["product"] = swapped
+                    names = d.get("product_names")
+                    if isinstance(names, list):                           # cycle count assignment
+                        for i, pid in enumerate(ids):
+                            if pid == cid and i < len(names) and same(names[i]):
+                                names[i] = new; changed = True
+                return changed
+        elif c["kind"] == "formula":
+            def fix(d):
+                changed = False
+                if str(d.get("formula_id")) == cid:
+                    for k in ("formula_name", "blend"):
+                        if same(d.get(k)):
+                            d[k] = new; changed = True
+                return changed
+        else:
+            # stock is tied to a location by its name, so every copy changes (stock layers included)
+            def fix(d):
+                changed = False
+                for k in LOCATION_KEYS:
+                    v = d.get(k)
+                    if isinstance(v, str) and v:
+                        # a transaction summary lists several: "A → B" or "A, B"
+                        swapped = _swap_joined(v, old, new, (" → ", ", ")) if k == "location" else (
+                            new if same(v) else v)
+                        if swapped != v:
+                            d[k] = swapped; changed = True
+                locs = d.get("locations")
+                if isinstance(locs, list) and any(same(x) for x in locs):
+                    d["locations"] = [new if same(x) else x for x in locs]; changed = True
+                return changed
+        for path, rows in data.items():
+            walk(path, rows, fix)
+    return counts
+
+
+def _rename_area_labels():
+    # a function because TRANSACTIONS_PATH is defined further down this file
+    return {
+        DATA_PATH: "Products & stock", FORMULAS_PATH: "Formulas", LOCATIONS_PATH: "Locations",
+        BLENDS_PATH: "Blend Log", PURCHASING_PATH: "Purchasing receipts", STAGING_PATH: "Staging",
+        TRANSACTIONS_PATH: "Transaction history", ASSIGNMENTS_PATH: "Assignments",
+        PACKAGE_INVENTORY_PATH: "Package records",
+    }
+
+
+def preview_renames(changes):
+    """(changes incl. linked ones, errors, {area label: records}) without saving anything."""
+    data = copy.deepcopy(_rename_files())
+    changes, errors = plan_renames(changes, data)
+    counts = apply_renames(changes, data) if not errors else {}
+    labels = _rename_area_labels()
+    return changes, errors, {labels[p]: n for p, n in counts.items()}
+
+
+def rename_everywhere(changes):
+    """Apply renames to every data file at once. Returns (changes, errors)."""
+    user = current_user() or {}
+    with inventory_lock():
+        data = _rename_files()
+        changes, errors = plan_renames(changes, data)
+        if errors or not changes:
+            return changes, errors
+        counts = apply_renames(changes, data)
+        ledger = load_ledger()
+        ledger.append(_build_ledger_entry(ledger, "renamed", {
+            "changes": [{k: c.get(k) for k in ("kind", "id", "old", "new", "linked")} for c in changes],
+            "by": user.get("username"),
+        }))
+        files = {path: data[path] for path in counts}
+        files[EVENT_LEDGER_PATH] = ledger
+        _commit_files(files)
+    return changes, []
+
+
+def _rename_candidates(q):
+    """Products, locations and formulas whose name contains q (case-insensitive)."""
+    ql = q.strip().lower()
+    out = []
+    for kind, rows in (("product", load_products()), ("location", load_locations()), ("formula", load_formulas())):
+        for r in rows:
+            name = r.get("name") or ""
+            if ql and ql in name.lower():
+                out.append({"kind": kind, "id": str(r.get("id")), "name": name})
+    out.sort(key=lambda x: (x["kind"], x["name"].lower()))
+    return out
+
+
+def _replace_in_name(name, q, r):
+    return re.sub(re.escape(q.strip()), lambda _m: r, name, flags=re.IGNORECASE).strip()
+
+
+@app.route("/find-replace", methods=["GET", "POST"])
+def find_replace_page():
+    q = (request.values.get("q") or "").strip()
+    r = request.values.get("r") or ""
+    candidates = _rename_candidates(q) if q else []
+    picked = set(request.values.getlist("sel"))
+    for c in candidates:
+        c["key"] = f"{c['kind']}:{c['id']}"
+        c["new"] = _replace_in_name(c["name"], q, r) if r.strip() else ""
+    chosen = [{"kind": c["kind"], "id": c["id"], "old": c["name"], "new": c["new"]}
+              for c in candidates if c["key"] in picked and c["new"]]
+
+    if request.method == "POST":
+        if not chosen:
+            flash("Tick at least one name and enter what to replace it with.", "danger")
+        else:
+            done, errors = rename_everywhere(chosen)
+            if errors:
+                for e in errors:
+                    flash(e, "danger")
+            else:
+                flash("Renamed: " + "; ".join(f"{c['old']} → {c['new']}" for c in done), "success")
+                return redirect(url_for("find_replace_page", q=r.strip()))
+
+    preview = None
+    if chosen and request.values.get("preview"):
+        changes, errors, areas = preview_renames(chosen)
+        preview = {"changes": changes, "errors": errors, "areas": areas}
+    return render_template("find_replace.html", app_title=APP_TITLE, q=q, r=r, candidates=candidates,
+                           picked=picked, preview=preview, kinds=RENAME_KINDS)
+
+
+# -------------------------
+# Similar product names (asked before adding a near-duplicate)
+# -------------------------
+SIMILAR_NAME_THRESHOLD = 0.8
+
+
+def _name_key(name):
+    return re.sub(r"\s+", " ", (name or "").strip().lower())
+
+
+def similar_products(name, exclude_id=None):
+    """Existing products whose name is at least 80% the same characters, closest first."""
+    from difflib import SequenceMatcher
+    key = _name_key(name)
+    if not key:
+        return []
+    out = []
+    for p in load_products():
+        if exclude_id is not None and str(p.get("id")) == str(exclude_id):
+            continue
+        score = SequenceMatcher(None, key, _name_key(p.get("name"))).ratio()
+        if score >= SIMILAR_NAME_THRESHOLD:
+            out.append({"id": str(p.get("id")), "name": p.get("name"), "score": round(score * 100),
+                        "quantity": p.get("quantity"), "unit": p.get("default_unit"),
+                        "url": url_for("product_detail", product_id=p.get("id"))})
+    out.sort(key=lambda x: -x["score"])
+    return out
+
+
+@app.get("/api/products/similar")
+def api_products_similar():
+    return jsonify({"matches": similar_products(request.args.get("name"), request.args.get("exclude_id"))})
+
+
+# -------------------------
+# Assignments: tasks and messages sent to people
+# -------------------------
+# Types: cycle_count, blend, reception (need the "assignments" feature to send)
+# and custom (a plain message anyone can send). Each task but custom comes
+# with its PDF; the person it's for marks it complete. Both sides can reply.
+ASSIGNMENT_TYPES = {
+    "cycle_count": "Cycle Count",
+    "blend": "Blend",
+    "reception": "Reception",
+    "custom": "Message",
+}
+
+
+def load_assignments():
+    return load_json(ASSIGNMENTS_PATH, [])
+
+
+def next_assignment_id(items):
+    n = 0
+    for a in items:
+        aid = str(a.get("id", ""))
+        if aid.startswith("ASN-") and aid[4:].isdigit():
+            n = max(n, int(aid[4:]))
+    return f"ASN-{n + 1:06d}"
+
+
+def open_assignment_count(user) -> int:
+    if not user:
+        return 0
+    return sum(1 for a in load_assignments()
+               if a.get("assigned_to") == user.get("id") and a.get("status") == "open")
+
+
+@app.context_processor
+def inject_assignment_count():
+    return {"my_open_assignments": open_assignment_count(current_user())}
+
+
+def _assignment_summary(a):
+    """One line describing the task, for lists and the PDF header."""
+    d = a.get("details") or {}
+    t = a.get("type")
+    if t == "cycle_count":
+        if d.get("all_products"):
+            return "Count all products"
+        names = d.get("product_names") or []
+        return f"Count {len(names)} product{'s' if len(names) != 1 else ''}: " + ", ".join(names)
+    if t == "blend":
+        pkg = d.get("package_name") or "Bulk"
+        return f"Make {d.get('batch_qty'):g} {str(d.get('batch_unit') or '').upper()} of {d.get('formula_name')} — {pkg}"
+    if t == "reception":
+        bits = [d.get("product_name") or ""]
+        if d.get("qty"):
+            bits.append(f"{d['qty']:g} {str(d.get('unit') or '').upper()}")
+        if d.get("carrier"):
+            bits.append(f"via {d['carrier']}")
+        when = " ".join(x for x in (d.get("expected_date"), d.get("expected_time")) if x)
+        if when:
+            bits.append(f"on {when}")
+        return " ".join(b for b in bits if b)
+    return d.get("message") or ""
+
+
+def _assignment_can_see(a, user):
+    return user and (user.get("role") == "admin" or user.get("id") in (a.get("assigned_to"), a.get("created_by_id")))
+
+
+def _form_float(form, name):
+    raw = (form.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(f"{name.replace('_', ' ').capitalize()} must be a number.")
+
+
+def _build_assignment_details(kind, form):
+    """Validate the form for one assignment type. Returns (details, errors)."""
+    errors, d = [], {}
+    if kind == "cycle_count":
+        d["all_products"] = form.get("all_products") == "1"
+        if not d["all_products"]:
+            by_id = {str(p.get("id")): p for p in load_products()}
+            ids = [i for i in form.getlist("product_ids") if i in by_id]
+            if not ids:
+                errors.append("Pick the products to count, or choose All products.")
+            d["product_ids"] = ids
+            d["product_names"] = [by_id[i].get("name") for i in ids]
+    elif kind == "blend":
+        formula = get_formula_by_id(load_formulas(), form.get("formula_id") or "")
+        if not formula:
+            errors.append("Pick the blend (formula) to make.")
+        try:
+            qty = _form_float(form, "batch_qty")
+        except ValueError as e:
+            errors.append(str(e)); qty = None
+        if not qty or qty <= 0:
+            errors.append("Enter how much to make.")
+        pkg = get_package_by_id(load_packages(), form.get("package_id") or "")
+        d.update({
+            "formula_id": (formula or {}).get("id"), "formula_name": (formula or {}).get("name"),
+            "batch_qty": qty, "batch_unit": "lb" if form.get("batch_unit") == "lb" else "gal",
+            "package_id": (pkg or {}).get("id"), "package_name": (pkg or {}).get("name"),
+        })
+    elif kind == "reception":
+        prod = next((p for p in load_products() if str(p.get("id")) == (form.get("product_id") or "")), None)
+        if not prod:
+            errors.append("Pick the product that's coming in.")
+        try:
+            qty = _form_float(form, "qty")
+        except ValueError as e:
+            errors.append(str(e)); qty = None
+        d.update({
+            "product_id": (prod or {}).get("id"), "product_name": (prod or {}).get("name"),
+            "qty": qty, "unit": normalize_unit(form.get("unit") or "gal") if qty else None,
+            "carrier": (form.get("carrier") or "").strip(),
+            "expected_date": (form.get("expected_date") or "").strip(),
+            "expected_time": (form.get("expected_time") or "").strip(),
+            "po_number": (form.get("po_number") or "").strip(),
+            "bol_number": (form.get("bol_number") or "").strip(),
+        })
+        if not d["carrier"]:
+            errors.append("Enter the carrier.")
+        if not d["expected_date"]:
+            errors.append("Enter the date it's showing up.")
+    else:
+        d["message"] = (form.get("message") or "").strip()
+        if not d["message"]:
+            errors.append("Write the message.")
+    return d, errors
+
+
+@app.route("/assignments")
+def assignments_page():
+    user = current_user()
+    items = [a for a in load_assignments() if _assignment_can_see(a, user)]
+    for a in items:
+        a["summary"] = _assignment_summary(a)
+        a["type_label"] = ASSIGNMENT_TYPES.get(a.get("type"), "Task")
+    # open first (oldest first, so nothing sits forgotten), then finished newest first
+    mine = [a for a in items if a.get("assigned_to") == user.get("id")]
+    mine = sorted([a for a in mine if a.get("status") == "open"], key=lambda a: a.get("created_at") or "") + \
+           sorted([a for a in mine if a.get("status") != "open"], key=lambda a: a.get("created_at") or "", reverse=True)
+    sent = sorted([a for a in items if a.get("created_by_id") == user.get("id")],
+                  key=lambda a: a.get("created_at") or "", reverse=True)
+    # Responses: replies and completions on what this person sent, newest first
+    responses = []
+    for a in sent:
+        for m in a.get("messages") or []:
+            if m.get("by_id") != user.get("id"):
+                responses.append({"assignment": a, **m})
+        if a.get("status") == "complete" and a.get("completed_by_id") != user.get("id"):
+            responses.append({"assignment": a, "by": a.get("completed_by"), "at": a.get("completed_at"),
+                              "text": a.get("completion_note") or "", "kind": "complete"})
+    responses.sort(key=lambda r: r.get("at") or "", reverse=True)
+
+    users = [u for u in (normalize_user(u) for u in load_users()) if u.get("active", True)]
+    tab = request.args.get("tab", "mine")
+    return render_template(
+        "assignments.html", app_title=APP_TITLE, tab=tab, mine=mine, sent=sent, responses=responses,
+        types=ASSIGNMENT_TYPES, can_assign=user_can(user, "assignments"),
+        users=sorted(users, key=lambda u: user_display_name(u).lower()),
+        locations=load_locations_safe(),
+        products=sorted(load_products(), key=lambda p: (p.get("name") or "").lower()),
+        formulas=sorted(load_formulas(), key=lambda f: (f.get("name") or "").lower()),
+        packages=load_packages(), form=request.args,
+    )
+
+
+@app.post("/assignments/new")
+def assignment_create():
+    user = current_user()
+    form = request.form
+    kind = form.get("type") or "custom"
+    errors = []
+    if kind not in ASSIGNMENT_TYPES:
+        errors.append("Unknown assignment type.")
+    elif kind != "custom" and not user_can(user, "assignments"):
+        errors.append("You can send messages, but sending cycle counts, blends and receptions needs "
+                      "the Send Assignments permission (an admin turns it on).")
+    target = next((u for u in load_users() if u.get("id") == form.get("assigned_to")
+                   and u.get("active", True)), None)
+    if not target:
+        errors.append("Pick who it's for.")
+    loc = get_location_by_id(load_locations_safe(), form.get("location_id") or "") if form.get("location_id") else None
+    if kind != "custom" and not loc:
+        errors.append("Pick the location.")
+    details = {}
+    if not errors:
+        details, errors = _build_assignment_details(kind, form)
+    if errors:
+        for e in errors:
+            flash(e, "danger")
+        return redirect(url_for("assignments_page", tab="new"))
+
+    items = load_assignments()
+    now = now_central_iso()
+    a = {
+        "id": next_assignment_id(items), "type": kind, "status": "open",
+        "created_at": now, "created_by": user.get("username"), "created_by_id": user.get("id"),
+        "created_by_name": user_display_name(user),
+        "assigned_to": target["id"], "assigned_to_name": user_display_name(normalize_user(target)),
+        "location_id": (loc or {}).get("id"), "location_name": (loc or {}).get("name"),
+        "due_date": (form.get("due_date") or "").strip() or None,
+        "note": (form.get("note") or "").strip() if kind != "custom" else "",
+        "details": details, "messages": [],
+        "completed_at": None, "completed_by": None, "completed_by_id": None, "completion_note": None,
+    }
+    items.append(a)
+    save_json(ASSIGNMENTS_PATH, items)
+    flash(f"{ASSIGNMENT_TYPES[kind]} sent to {a['assigned_to_name']}.", "success")
+    return redirect(url_for("assignments_page", tab="sent"))
+
+
+def _assignment_for_action(aid):
+    items = load_assignments()
+    a = next((x for x in items if x.get("id") == aid), None)
+    return items, a
+
+
+@app.post("/assignments/<aid>/reply")
+def assignment_reply(aid):
+    user = current_user()
+    items, a = _assignment_for_action(aid)
+    text = (request.form.get("text") or "").strip()
+    back = request.form.get("tab") or "mine"
+    if not a or not _assignment_can_see(a, user):
+        flash("That assignment wasn't found.", "danger")
+    elif not text:
+        flash("Write a reply first.", "danger")
+    else:
+        a.setdefault("messages", []).append({"by": user_display_name(user), "by_id": user.get("id"),
+                                             "at": now_central_iso(), "text": text[:2000]})
+        save_json(ASSIGNMENTS_PATH, items)
+    return redirect(url_for("assignments_page", tab=back) + f"#{aid}")
+
+
+@app.post("/assignments/<aid>/complete")
+def assignment_complete(aid):
+    user = current_user()
+    items, a = _assignment_for_action(aid)
+    if not a or a.get("assigned_to") != user.get("id"):
+        flash("Only the person it's assigned to can mark it complete.", "danger")
+    elif a.get("status") != "open":
+        flash("That assignment is already closed.", "info")
+    else:
+        a.update({"status": "complete", "completed_at": now_central_iso(), "completed_by": user_display_name(user),
+                  "completed_by_id": user.get("id"),
+                  "completion_note": (request.form.get("note") or "").strip()[:2000] or None})
+        save_json(ASSIGNMENTS_PATH, items)
+        flash(f"{a['id']} marked complete.", "success")
+    return redirect(url_for("assignments_page", tab="mine"))
+
+
+@app.post("/assignments/<aid>/cancel")
+def assignment_cancel(aid):
+    user = current_user()
+    items, a = _assignment_for_action(aid)
+    if not a or not (a.get("created_by_id") == user.get("id") or user.get("role") == "admin"):
+        flash("Only the person who sent it can cancel it.", "danger")
+    elif a.get("status") != "open":
+        flash("That assignment is already closed.", "info")
+    else:
+        a.update({"status": "cancelled", "cancelled_at": now_central_iso(), "cancelled_by": user_display_name(user)})
+        save_json(ASSIGNMENTS_PATH, items)
+        flash(f"{a['id']} cancelled.", "success")
+    return redirect(url_for("assignments_page", tab="sent"))
+
+
+def _cycle_count_rows_for(location_name, product_ids=None):
+    """Every product (or just these) to count at one location, for an assigned count sheet."""
+    rows = []
+    wanted = set(product_ids or [])
+    for p in load_products():
+        if wanted and str(p.get("id")) not in wanted:
+            continue
+        rows.append({"product_id": p.get("id"), "product_name": p.get("name") or "(unnamed)",
+                     "location": location_name or "", "default_unit": normalize_unit(p.get("default_unit"))})
+    rows.sort(key=lambda r: (r["product_name"] or "").lower())
+    return rows
+
+
+def pdf_reception(a):
+    from reportlab.platypus import Paragraph, Spacer
+
+    d = a.get("details") or {}
+
+    def build(elements):
+        styles = _get_report_styles()
+        _pdf_header(elements, styles, "Incoming Shipment", _assignment_pdf_lines(a))
+        rows = [["", "Expected", "Actual (fill in)"]]
+        for label, val in (
+            ("Product", d.get("product_name") or ""),
+            ("Quantity", f"{d['qty']:g} {str(d.get('unit') or '').upper()}" if d.get("qty") else ""),
+            ("Carrier", d.get("carrier") or ""),
+            ("Date", d.get("expected_date") or ""),
+            ("Time", d.get("expected_time") or ""),
+            ("PO #", d.get("po_number") or ""),
+            ("BOL #", d.get("bol_number") or ""),
+            ("Location", a.get("location_name") or ""),
+        ):
+            rows.append([label, val, "______________________"])
+        elements.append(_make_table(rows, [110, 200, 200]))
+        elements.append(Spacer(1, 18))
+        elements.append(Paragraph("Received by: ______________________ &nbsp;&nbsp; "
+                                  "Signature: ______________________", styles["Normal"]))
+        elements.append(Spacer(1, 12))
+        elements.append(Paragraph("Notes: ________________________________________________________________",
+                                  styles["Normal"]))
+
+    return _build_pdf_buffer(build)
+
+
+def _assignment_pdf_lines(a):
+    esc = html.escape  # typed text goes into reportlab markup
+    lines = [f"<b>Assignment:</b> {a['id']} &nbsp;&nbsp; <b>For:</b> {esc(a.get('assigned_to_name') or '')}"
+             f" &nbsp;&nbsp; <b>From:</b> {esc(a.get('created_by_name') or '')}"]
+    if a.get("due_date"):
+        lines.append(f"<b>Due:</b> {esc(a['due_date'])}")
+    if a.get("note"):
+        lines.append(f"<b>Note:</b> {esc(a['note'])}")
+    return lines
+
+
+@app.route("/assignments/<aid>/pdf")
+def assignment_pdf(aid):
+    user = current_user()
+    _, a = _assignment_for_action(aid)
+    if not a or not _assignment_can_see(a, user):
+        return render_template("no_access.html"), 404
+    d = a.get("details") or {}
+    if a["type"] == "cycle_count":
+        rows = _cycle_count_rows_for(a.get("location_name"), None if d.get("all_products") else d.get("product_ids"))
+        buf = pdf_cycle_count(rows, a.get("location_name"), _assignment_pdf_lines(a))
+        return _pdf_response(buf, f"{a['id']}_cycle_count.pdf")
+    if a["type"] == "blend":
+        formula = get_formula_by_id(load_formulas(), d.get("formula_id") or "")
+        if not formula:
+            flash("That blend's formula no longer exists.", "danger")
+            return redirect(url_for("assignments_page"))
+        rep = build_blend_instruction_report(formula, d.get("batch_qty"), d.get("batch_unit"), a.get("location_id"))
+        extra = _assignment_pdf_lines(a) + [f"<b>Package:</b> {html.escape(d.get('package_name') or 'Bulk (no package)')}"]
+        buf = pdf_blend_instruction(rep, extra)
+        return _pdf_response(buf, f"{a['id']}_blend_{(d.get('formula_name') or 'blend').replace(' ', '_')}.pdf")
+    if a["type"] == "reception":
+        return _pdf_response(pdf_reception(a), f"{a['id']}_reception.pdf")
+    return redirect(url_for("assignments_page"))
 
 
 # -------------------------

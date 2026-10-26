@@ -149,6 +149,31 @@
       </table>
     </div>
   </div>
+  {% set pulls = rep.rows|selectattr('pull')|list %}
+  {% if pulls %}
+  <div class="card-body border-top">
+    <div class="fw-semibold mb-1">Pull from — at {{ rep.location_name }}</div>
+    <div class="text-muted small mb-2">Loose/partial stock and tanks first, then as few packages as possible, leaving the least behind in the one that gets opened.</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-top">
+        <thead class="table-light"><tr><th>Component</th><th class="text-end">Need (gal)</th><th>Pull from</th></tr></thead>
+        <tbody>
+          {% for r in pulls %}
+          <tr>
+            <td class="fw-semibold">{{ r.name }}</td>
+            <td class="text-end">{{ num(r.need_gal) }}</td>
+            <td>
+              {% for step in r.pull.steps %}
+                <div class="{{ 'st-short' if step.startswith('SHORT') }}">{% if not step.startswith('SHORT') %}&bull; {% endif %}{{ step }}</div>
+              {% else %}<span class="text-muted">nothing needed</span>{% endfor %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
   {% if rep.formula.description %}
   <div class="card-body border-top">
     <div class="fw-semibold mb-1">Notes</div>

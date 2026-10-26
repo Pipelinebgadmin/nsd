@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .sr-group { font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #64748b; }
+  .sr-item { display: block; padding: 8px 16px; border-bottom: 1px solid #f1f5f9; text-decoration: none; color: #0f172a; }
+  .sr-item:last-child { border-bottom: 0; }
+  .sr-item:hover { background: #eff6ff; }
+  .sr-t { font-weight: 600; font-size: .92rem; }
+  .sr-s { font-size: .8rem; color: #64748b; }
+</style>
+
+<div class="mb-3">
+  <h2 class="section-title mb-1">Search</h2>
+  <form method="GET" action="{{ url_for('search_page') }}" class="d-flex gap-2" style="max-width:560px;">
+    <input type="search" class="form-control" name="q" value="{{ q }}" placeholder="Search everything…" autofocus>
+    <button class="btn btn-primary">Search</button>
+  </form>
+  <div class="text-muted small mt-1">Shows only what your permissions and locations allow.</div>
+</div>
+
+{% if q %}
+  {% for g in groups %}
+  <div class="card section-card shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between">
+      <span class="sr-group">{{ g.group }}</span>
+      <span class="text-muted small">{{ g['items']|length + g.more }}{% if g.more %} (first {{ g['items']|length }} shown){% endif %}</span>
+    </div>
+    {% for it in g['items'] %}
+    <a class="sr-item" href="{{ it.url }}">
+      <div class="sr-t">{{ it.title }}</div>
+      {% if it.sub %}<div class="sr-s">{{ it.sub }}</div>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card section-card shadow-sm"><div class="card-body text-muted">Nothing found for "{{ q }}".</div></div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

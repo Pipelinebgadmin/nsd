@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .fr-table td, .fr-table th { font-size: .9rem; }
+  .fr-kind { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+  .fr-kind.product { background: #e0f2fe; color: #075985; }
+  .fr-kind.location { background: #dcfce7; color: #166534; }
+  .fr-kind.formula { background: #ede9fe; color: #5b21b6; }
+  .fr-new { font-weight: 600; color: #1d4ed8; }
+  .fr-old { color: #64748b; text-decoration: line-through; }
+</style>
+
+<div class="mb-3">
+  <h2 class="section-title mb-0">Find &amp; Replace</h2>
+  <div class="text-muted small">
+    Rename products, locations and formulas everywhere: stock, history, Blend Log, receipts, staging and assignments.
+    Opens with Ctrl+F (Cmd+F on a Mac).
+  </div>
+</div>
+
+<form method="GET" action="{{ url_for('find_replace_page') }}" id="frForm">
+  <div class="card section-card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-5">
+          <label class="form-label" for="frQ">Find</label>
+          <input class="form-control" id="frQ" name="q" value="{{ q }}" placeholder="Name or part of a name" autofocus autocomplete="off">
+        </div>
+        <div class="col-md-5">
+          <label class="form-label" for="frR">Replace with</label>
+          <input class="form-control" id="frR" name="r" value="{{ r }}" autocomplete="off">
+        </div>
+        <div class="col-md-2 d-grid">
+          <button class="btn btn-outline-primary" name="find" value="1">Find</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if q %}
+  <div class="card section-card shadow-sm mb-3">
+    {% if candidates %}
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle fr-table">
+        <thead class="table-light">
+          <tr>
+            <th style="width:36px;"><input type="checkbox" class="form-check-input" id="frAll" aria-label="Select all"></th>
+            <th>Type</th><th>Current name</th><th>New name</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in candidates %}
+          <tr>
+            <td><input type="checkbox" class="form-check-input fr-sel" name="sel" value="{{ c.key }}" {{ 'checked' if c.key in picked }}></td>
+            <td><span class="badge fr-kind {{ c.kind }}">{{ kinds[c.kind] }}</span></td>
+            <td>{{ c.name }}</td>
+            <td class="fr-new" data-name="{{ c.name }}">{{ c.new }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-body border-top d-flex gap-2 align-items-center flex-wrap">
+      <button class="btn btn-primary" name="preview" value="1">Preview changes</button>
+      <span class="text-muted small">Tick the names to change. Nothing changes until you confirm.</span>
+    </div>
+    {% else %}
+    <div class="card-body text-muted">No product, location or formula names contain "{{ q }}".</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</form>
+
+{% if preview %}
+<div class="card section-card shadow-sm">
+  <div class="card-body">
+    <h6 class="fw-semibold">Preview</h6>
+    {% if preview.errors %}
+      {% for e in preview.errors %}<div class="alert alert-danger py-2 mb-2">{{ e }}</div>{% endfor %}
+    {% else %}
+      <ul class="mb-2">
+        {% for c in preview.changes %}
+        <li>{{ kinds[c.kind] }}: <span class="fr-old">{{ c.old }}</span> → <span class="fr-new">{{ c.new }}</span>
+          {% if c.linked %}<span class="text-muted small">(its {{ 'blend product' if c.kind == 'product' else 'formula' }}, renamed with it)</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      <div class="small text-muted mb-1">Records that will change:</div>
+      <table class="table table-sm mb-3" style="max-width:420px;">
+        <tbody>
+          {% for area, n in preview.areas.items() %}<tr><td>{{ area }}</td><td class="text-end">{{ n }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <form method="POST" action="{{ url_for('find_replace_page') }}" class="d-flex gap-2"
+            onsubmit="return confirm('Rename these everywhere? Old records will show the new name.');">
+        <input type="hidden" name="q" value="{{ q }}">
+        <input type="hidden" name="r" value="{{ r }}">
+        {% for k in picked %}<input type="hidden" name="sel" value="{{ k }}">{% endfor %}
+        <button class="btn btn-danger">Replace everywhere</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('find_replace_page', q=q, r=r) }}">Cancel</a>
+      </form>
+      <div class="text-muted small mt-2">The audit ledger keeps its old entries and records this rename as a new one.</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  const all = document.getElementById("frAll");
+  all && all.addEventListener("change", function () {
+    document.querySelectorAll(".fr-sel").forEach(cb => { cb.checked = all.checked; });
+  });
+  // Show the new names as you type the replacement (the server does the same)
+  const q = document.getElementById("frQ"), r = document.getElementById("frR");
+  function esc(t) { return t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  function update() {
+    const find = {{ q|tojson }}, rep = r.value;  // the search the list was made from
+    document.querySelectorAll(".fr-new[data-name]").forEach(td => {
+      td.textContent = find && rep.trim() ? td.dataset.name.replace(new RegExp(esc(find), "gi"), () => rep).trim() : "";
+    });
+  }
+  r.addEventListener("input", update);
+})();
+</script>
+{% endblock %}

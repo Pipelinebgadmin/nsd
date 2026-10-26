@@ -36,7 +36,7 @@
 
 <div class="card section-card shadow-sm">
   <div class="card-body">
-    <form method="POST" action="{{ url_for('add_product') }}">
+    <form method="POST" action="{{ url_for('add_product') }}" id="addProductForm">
 
       <!-- Row 1: Name, Phase -->
       <div class="row-form">
@@ -168,4 +168,5 @@
   <small>Add product • NStock</small>
 </div>
 
+{% with form_id="addProductForm", exclude_id=none, original_name="" %}{% include "_similar_modal.html" %}{% endwith %}
 {% endblock %}

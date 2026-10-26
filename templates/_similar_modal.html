@@ -1,0 +1,73 @@
+{# Asks before saving a product whose name is 80%+ like an existing one.
+   Include inside a page with: form_id, exclude_id (or none), original_name (or ''), similar (server matches or none). #}
+<style>
+  #simModal { z-index: 3000; }
+  .modal-backdrop { z-index: 2990; }
+</style>
+<div class="modal fade" id="simModal" tabindex="-1" aria-labelledby="simTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="simTitle">Is this really a new product?</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2"><b id="simName"></b> looks a lot like:</p>
+        <table class="table table-sm mb-2">
+          <thead class="table-light"><tr><th>Existing product</th><th class="text-end">On hand</th><th class="text-end">Match</th><th></th></tr></thead>
+          <tbody id="simRows"></tbody>
+        </table>
+        <p class="text-muted small mb-0">If it's one of these, open it instead of making a duplicate.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Go back</button>
+        <button type="button" class="btn btn-primary" id="simYes">Yes, it's a different product</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  const form = document.getElementById({{ form_id|tojson }});
+  if (!form) return;
+  const nameIn = form.querySelector('input[name="name"]');
+  const original = {{ (original_name or '')|tojson }};
+  const excludeId = {{ (exclude_id or '')|tojson }};
+  let confirmed = form.querySelector('input[name="confirm_similar"]');
+  if (!confirmed) {
+    confirmed = document.createElement("input");
+    confirmed.type = "hidden"; confirmed.name = "confirm_similar"; confirmed.value = "";
+    form.appendChild(confirmed);
+  }
+  const modalEl = document.getElementById("simModal");
+  function esc(t) { const d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+  function show(matches) {
+    document.getElementById("simName").textContent = nameIn.value.trim();
+    document.getElementById("simRows").innerHTML = matches.map(m =>
+      "<tr><td>" + esc(m.name) + "</td><td class='text-end'>" + esc(m.quantity ?? 0) + " " + esc(m.unit || "") +
+      "</td><td class='text-end'>" + m.score + "%</td><td class='text-end'><a class='btn btn-sm btn-outline-primary' href='" +
+      esc(m.url) + "'>Open</a></td></tr>").join("");
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+  document.getElementById("simYes").addEventListener("click", function () {
+    confirmed.value = "1";
+    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    form.requestSubmit ? form.requestSubmit() : form.submit();
+  });
+  form.addEventListener("submit", function (e) {
+    const name = nameIn.value.trim();
+    if (confirmed.value === "1" || !name || name === original) return;
+    e.preventDefault();
+    const url = {{ url_for('api_products_similar')|tojson }} + "?name=" + encodeURIComponent(name) +
+                (excludeId ? "&exclude_id=" + encodeURIComponent(excludeId) : "");
+    fetch(url).then(r => r.json()).then(function (j) {
+      if (j.matches && j.matches.length) show(j.matches);
+      else { confirmed.value = "1"; form.requestSubmit ? form.requestSubmit() : form.submit(); }
+    }).catch(function () { confirmed.value = "1"; form.submit(); });  // the server checks again anyway
+  });
+  {% if similar %}
+  // Bootstrap loads at the bottom of the page, after this
+  document.addEventListener("DOMContentLoaded", function () { show({{ similar|tojson }}); });
+  {% endif %}
+})();
+</script>

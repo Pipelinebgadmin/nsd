@@ -177,7 +177,7 @@
     {# =========================
        SAVE FORM (only this form wraps fields)
        ========================= #}
-    <form method="POST" action="{{ url_for('product_detail', product_id=p.id) }}">
+    <form method="POST" action="{{ url_for('product_detail', product_id=p.id) }}" id="editProductForm">
       <input type="hidden" name="action" value="save" />
 
       <div class="grid">
@@ -445,4 +445,5 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 
+{% with form_id="editProductForm", exclude_id=p.id, original_name=p.name %}{% include "_similar_modal.html" %}{% endwith %}
 {% endblock %}

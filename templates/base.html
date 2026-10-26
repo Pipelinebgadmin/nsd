@@ -101,6 +101,13 @@
     .nstock-topnav a:hover { background: #f1f5f9; color: #0f172a; }
     .nstock-topnav a.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
     .nstock-topnav a:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+    /* open-assignment count next to the Assignments link */
+    .nstock-count {
+      display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 5px;
+      border-radius: 9px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 700;
+      line-height: 18px; text-align: center; vertical-align: 1px;
+    }
+    .nstock-count[hidden] { display: none; }
 
     /* Wide screens: menu lives in the top bar, side menu is not used.
        Narrow screens: links don't fit across the top, so the ☰ side menu comes back. */
@@ -111,6 +118,34 @@
       /* kept as an empty spacer so the user menu stays on the right */
       .nstock-topnav { visibility: hidden; }
     }
+
+    /* ---- Master search (toolbar) ---- */
+    .nstock-search { position: relative; flex: 0 1 240px; min-width: 150px; margin: 0; }
+    .nstock-search input {
+      width: 100%; height: 34px; padding: 0 30px 0 32px; border: 1px solid #e2e8f0; border-radius: 8px;
+      background: #f8fafc; font-size: .875rem; color: #0f172a;
+    }
+    .nstock-search input:focus { outline: none; border-color: #93c5fd; background: #fff; box-shadow: 0 0 0 3px #dbeafe; }
+    .nstock-search .ns-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+    .nstock-search kbd { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); font-size: 10px;
+      background: #fff; color: #94a3b8; border: 1px solid #e2e8f0; padding: 1px 4px; border-radius: 4px; }
+    .nstock-search input:focus ~ kbd { display: none; }
+    .ns-results {
+      position: absolute; top: calc(100% + 6px); right: 0; width: min(460px, 92vw); max-height: 70vh; overflow: auto;
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 12px 32px rgba(15, 23, 42, .16);
+      z-index: 2600; padding: 6px 0;
+    }
+    .ns-results[hidden] { display: none; }
+    .ns-group { padding: 6px 12px 2px; font-size: .68rem; font-weight: 700; letter-spacing: .05em;
+      text-transform: uppercase; color: #94a3b8; }
+    .ns-item { display: block; padding: 6px 12px; text-decoration: none; color: #0f172a; cursor: pointer; }
+    .ns-item .ns-t { font-size: .875rem; font-weight: 600; }
+    .ns-item .ns-s { font-size: .75rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ns-item:hover, .ns-item.sel { background: #eff6ff; color: #0f172a; }
+    .ns-item mark { padding: 0; background: #fef08a; color: inherit; }
+    .ns-empty, .ns-all { padding: 8px 12px; font-size: .85rem; color: #64748b; }
+    .ns-all { display: block; border-top: 1px solid #f1f5f9; margin-top: 4px; color: #1d4ed8; text-decoration: none; font-weight: 600; }
+    .ns-all.sel, .ns-all:hover { background: #eff6ff; }
 
     /* ---- Maximized-window controls in the header ---- */
     .win-header-controls { display: flex; align-items: center; gap: 2px; padding: 3px 4px 3px 12px;
@@ -158,6 +193,7 @@
     ('formulas_page', 'Formula Catalog', 'formulas'),
     ('locations_page', 'Locations', 'locations'),
     ('purchasing_page', 'Purchasing', 'purchasing'),
+    ('assignments_page', 'Assignments', None),
   ] %}
   <!-- ================= HEADER ================= -->
   <header class="nstock-header">
@@ -179,13 +215,24 @@
         {% if feature is none or can(feature) %}
         <a href="{{ url_for(endpoint) }}" class="{% if request.endpoint == endpoint %}active{% endif %}"
            {% if endpoint != 'home' %}data-win data-win-title="{{ label }}"{% endif %}
-           {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
+           {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}{% if endpoint == 'assignments_page' %}<span class="nstock-count" data-asn-badge {{ 'hidden' if not my_open_assignments }}>{{ my_open_assignments }}</span>{% endif %}</a>
         {% endif %}
       {% endfor %}
       {% if current_user and current_user.role == 'admin' %}
         <a href="{{ url_for('admin_page') }}" class="{% if request.endpoint == 'admin_page' %}active{% endif %}" data-win data-win-title="Admin">Admin</a>
       {% endif %}
     </nav>
+
+    <!-- Master search: anything the user is allowed to see (Ctrl+K / Cmd+K) -->
+    {% if current_user %}
+    <form class="nstock-search" role="search" action="{{ url_for('search_page') }}" method="GET" id="nsForm" autocomplete="off">
+      <svg class="ns-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+      <input type="search" name="q" id="nsInput" placeholder="Search everything…" aria-label="Search everything"
+             aria-controls="nsResults" aria-expanded="false" data-api="{{ url_for('api_search') }}">
+      <kbd aria-hidden="true">Ctrl K</kbd>
+      <div class="ns-results" id="nsResults" role="listbox" hidden></div>
+    </form>
+    {% endif %}
 
     <!-- Controls for a maximized window appear here (QuickBooks style) -->
     <div id="winHeaderControls" class="win-header-controls" hidden>
@@ -227,7 +274,7 @@
         {% if feature is none or can(feature) %}
         <li>
           <a href="{{ url_for(endpoint) }}" class="{% if request.endpoint == endpoint %}active{% endif %}"
-             {% if endpoint != 'home' %}data-win data-win-title="{{ label }}"{% endif %}>{{ label }}</a>
+             {% if endpoint != 'home' %}data-win data-win-title="{{ label }}"{% endif %}>{{ label }}{% if endpoint == 'assignments_page' %}<span class="nstock-count" data-asn-badge {{ 'hidden' if not my_open_assignments }}>{{ my_open_assignments }}</span>{% endif %}</a>
         </li>
         {% endif %}
       {% endfor %}
@@ -271,6 +318,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/windows.js') }}"></script>
   <script src="{{ url_for('static', filename='js/nstock-nav.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/nstock-search.js') }}"></script>
   <script>
     // Sidebar open / close
     (function () {
@@ -296,6 +344,19 @@
     // reserve this shortcut for focusing the address bar; preventDefault
     // stops that so the page can handle it instead. Not guaranteed to work
     // in every browser/OS combo since some intercept it before JS ever sees it.
+    {% if current_user and current_user.role == 'admin' %}
+    // Ctrl+F (Cmd+F on Mac) opens Find & Replace in a window instead of the browser's find bar.
+    // Any text selected on the page is searched for right away.
+    document.addEventListener("keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key || "").toLowerCase() === "f") {
+        e.preventDefault();
+        const picked = (window.getSelection && String(window.getSelection())).trim().slice(0, 80);
+        const url = "{{ url_for('find_replace_page') }}" + (picked ? "?q=" + encodeURIComponent(picked) : "");
+        if (window.openWindow) window.openWindow(url, "Find & Replace");
+        else window.location.href = url;
+      }
+    });
+    {% endif %}
     {% if can('ledger') %}
     document.addEventListener("keydown", function (e) {
       const key = (e.key || "").toLowerCase();
