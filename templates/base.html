@@ -157,6 +157,7 @@
     ('blend_log_page', 'Blend Log', ['blending', 'blend_builder']),
     ('formulas_page', 'Formula Catalog', 'formulas'),
     ('locations_page', 'Locations', 'locations'),
+    ('purchasing_page', 'Purchasing', 'purchasing'),
   ] %}
   <!-- ================= HEADER ================= -->
   <header class="nstock-header">
@@ -177,11 +178,12 @@
       {% for endpoint, label, feature in nav_items %}
         {% if feature is none or can(feature) %}
         <a href="{{ url_for(endpoint) }}" class="{% if request.endpoint == endpoint %}active{% endif %}"
+           {% if endpoint != 'home' %}data-win data-win-title="{{ label }}"{% endif %}
            {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
         {% endif %}
       {% endfor %}
       {% if current_user and current_user.role == 'admin' %}
-        <a href="{{ url_for('admin_page') }}" class="{% if request.endpoint == 'admin_page' %}active{% endif %}">Admin</a>
+        <a href="{{ url_for('admin_page') }}" class="{% if request.endpoint == 'admin_page' %}active{% endif %}" data-win data-win-title="Admin">Admin</a>
       {% endif %}
     </nav>
 
@@ -224,7 +226,8 @@
       {% for endpoint, label, feature in nav_items %}
         {% if feature is none or can(feature) %}
         <li>
-          <a href="{{ url_for(endpoint) }}" class="{% if request.endpoint == endpoint %}active{% endif %}">{{ label }}</a>
+          <a href="{{ url_for(endpoint) }}" class="{% if request.endpoint == endpoint %}active{% endif %}"
+             {% if endpoint != 'home' %}data-win data-win-title="{{ label }}"{% endif %}>{{ label }}</a>
         </li>
         {% endif %}
       {% endfor %}
@@ -232,7 +235,7 @@
     {% if current_user and current_user.role == 'admin' %}
     <div class="nstock-sidebar-section">Admin</div>
     <ul>
-      <li><a href="{{ url_for('admin_page') }}" class="{% if request.endpoint == 'admin_page' %}active{% endif %}">Users &amp; Sheets</a></li>
+      <li><a href="{{ url_for('admin_page') }}" class="{% if request.endpoint == 'admin_page' %}active{% endif %}" data-win data-win-title="Admin">Users &amp; Sheets</a></li>
     </ul>
     {% endif %}
   </nav>
@@ -284,6 +287,8 @@
       btn.addEventListener("click", function () { setOpen(!bar.classList.contains("open")); });
       back.addEventListener("click", function () { setOpen(false); });
       document.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
+      // Picking a page from the menu opens it as a window, so close the menu too
+      bar.addEventListener("click", function (e) { if (e.target.closest("[data-win]")) setOpen(false); });
     })();
   </script>
   <script>

@@ -71,7 +71,7 @@
   border:1px solid #dbe3ea;
   border-radius:14px;
   width:150px;
-  min-height:110px;
+  height:172px; /* fixed so every card matches, even when text wraps to two lines */
   padding:12px 10px;
   display:flex;
   flex-direction:column;
@@ -260,6 +260,16 @@
           <img src="{{ url_for('static', filename='images/icons/formula-catalog.svg') }}" alt="">
           <div class="card-title">Formula Catalog</div>
           <div class="card-subtext">Saved blend recipes</div>
+        </div>
+      </a>
+      {% endif %}
+
+      {% if can('purchasing') %}
+      <a href="{{ url_for('purchasing_page') }}" class="card-link" data-win data-win-title="Purchasing">
+        <div class="tool-card">
+          <img src="{{ url_for('static', filename='images/icons/purchasing.svg') }}" alt="">
+          <div class="card-title">Purchasing</div>
+          <div class="card-subtext">Vendor &amp; price for receipts</div>
         </div>
       </a>
       {% endif %}

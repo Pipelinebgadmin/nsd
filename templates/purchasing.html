@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .pu-table th { font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; color: #475569; font-weight: 700; white-space: nowrap; vertical-align: bottom; }
+  .pu-table td { font-size: .88rem; white-space: nowrap; }
+  .pu-table input.form-control { font-size: .85rem; padding: .2rem .45rem; }
+  .pu-table .pu-vendor { min-width: 170px; }
+  .pu-table .pu-price { width: 110px; }
+  .pu-table tr.pu-dirty td { background: #fffbeb; }
+  .pu-table tr.pu-saved td { background: #f0fdf4; }
+  .pu-msg { font-size: .75rem; }
+  .modal-backdrop { z-index: 2990; }
+  .modal { z-index: 3000; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="section-title mb-0">Purchasing</h2>
+    <div class="text-muted small">Every receipt from the receive screens. Enter the vendor and price per unit. This is where inventory cost comes from.</div>
+  </div>
+  <input type="search" id="puSearch" class="form-control" placeholder="Search PO, BOL, product, vendor…" style="min-width:260px; max-width:320px;">
+</div>
+
+<ul class="nav nav-tabs mb-0">
+  {% for key, label in [('unpriced', 'Unpriced'), ('priced', 'Priced'), ('all', 'All')] %}
+  <li class="nav-item">
+    <a class="nav-link {{ 'active' if show == key }}" href="{{ url_for('purchasing_page', show=key) }}">
+      {{ label }} <span class="badge {{ 'bg-warning text-dark' if key == 'unpriced' and counts[key] else 'bg-secondary' }}">{{ counts[key] }}</span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+
+<div class="card section-card shadow-sm" style="border-top-left-radius:0;">
+  {% if receipts %}
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle pu-table">
+      <thead class="table-light">
+        <tr>
+          <th>Received</th><th>PO #</th><th>BOL #</th><th>Product</th>
+          <th class="text-end">Qty</th><th>UM</th><th>Location</th>
+          <th>Vendor</th><th>Price / UM</th><th>Date priced</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="puBody">
+        {% for r in receipts %}
+        <tr data-id="{{ r.id }}" data-url="{{ url_for('purchasing_price', receipt_id=r.id) }}"
+            data-priced="{{ '1' if r.unit_price is not none else '0' }}"
+            data-orig-vendor="{{ r.vendor or '' }}"
+            data-orig-price="{{ ('%.4f'|format(r.unit_price)).rstrip('0').rstrip('.') if r.unit_price is not none else '' }}"
+            data-label="{{ r.product_name }}{% if r.po_number %} · PO {{ r.po_number }}{% endif %}{% if r.bol_number %} · BOL {{ r.bol_number }}{% endif %}"
+            data-unit="{{ (r.unit or '')|upper }}"
+            data-search="{{ (r.id ~ ' ' ~ (r.po_number or '') ~ ' ' ~ (r.bol_number or '') ~ ' ' ~ r.product_name ~ ' ' ~ (r.vendor or '') ~ ' ' ~ (r.location or ''))|lower }}">
+          <td title="{{ r.id }}{% if r.received_by %} · by {{ r.received_by }}{% endif %}">{{ r.received_date }}</td>
+          <td>{{ r.po_number or '' }}</td>
+          <td>{{ r.bol_number or '' }}</td>
+          <td class="fw-semibold">{{ r.product_name }}</td>
+          <td class="text-end">{{ '%g'|format(r.qty) }}</td>
+          <td>{{ (r.unit or '')|upper }}</td>
+          <td>{{ r.location }}{% if r.tanks %}<div class="small text-muted">{{ r.tanks|join(', ') }}</div>{% endif %}</td>
+          <td><input class="form-control pu-vendor" list="puVendors" value="{{ r.vendor or '' }}" placeholder="Vendor" aria-label="Vendor"></td>
+          <td>
+            <div class="input-group input-group-sm pu-price">
+              <span class="input-group-text">$</span>
+              <input class="form-control pu-price-in" type="number" step="any" min="0" inputmode="decimal"
+                     value="{{ ('%.4f'|format(r.unit_price)).rstrip('0').rstrip('.') if r.unit_price is not none else '' }}" placeholder="0.00" aria-label="Price per {{ (r.unit or '')|upper }}">
+            </div>
+          </td>
+          <td class="pu-priced" title="{% if r.priced_by %}by {{ r.priced_by }}{% endif %}">{{ r.priced_date or '—' }}</td>
+          <td>
+            <button type="button" class="btn btn-sm btn-primary pu-save" disabled>Save</button>
+            <div class="pu-msg text-danger"></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body text-muted">
+    {% if show == 'unpriced' %}Nothing waiting to be priced.{% else %}No receipts here yet.{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<datalist id="puVendors">
+  {% for v in vendors %}<option value="{{ v }}">{% endfor %}
+</datalist>
+
+<!-- Confirmation before changing a price that was already saved -->
+<div class="modal fade" id="puConfirm" tabindex="-1" aria-labelledby="puConfirmTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="puConfirmTitle">Change saved price?</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="fw-semibold mb-2" id="puConfirmItem"></div>
+        <table class="table table-sm mb-2">
+          <thead class="table-light"><tr><th></th><th>Now</th><th>New</th></tr></thead>
+          <tbody id="puConfirmRows"></tbody>
+        </table>
+        <p class="text-muted small mb-0">The cost of whatever is left of this load, and of any blends made from it, will be recalculated. The old price is kept in the history.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-warning" id="puConfirmBtn">Change price</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const body = document.getElementById("puBody");
+  const search = document.getElementById("puSearch");
+
+  search && search.addEventListener("input", function () {
+    const q = search.value.trim().toLowerCase();
+    document.querySelectorAll("#puBody tr").forEach(function (tr) {
+      tr.hidden = q && !tr.dataset.search.includes(q);
+    });
+  });
+  if (!body) return;
+  // compare prices as numbers, however they were written
+  body.querySelectorAll("tr").forEach(function (tr) {
+    if (tr.dataset.origPrice !== "") tr.dataset.origPrice = String(parseFloat(tr.dataset.origPrice));
+  });
+
+  function vals(tr) {
+    return { vendor: tr.querySelector(".pu-vendor").value.trim(),
+             price: tr.querySelector(".pu-price-in").value.trim() };
+  }
+  function isDirty(tr) {
+    const v = vals(tr);
+    return v.vendor !== tr.dataset.origVendor ||
+           (v.price === "" ? "" : String(parseFloat(v.price))) !== tr.dataset.origPrice;
+  }
+  function refresh(tr) {
+    const dirty = isDirty(tr);
+    tr.classList.toggle("pu-dirty", dirty);
+    if (dirty) tr.classList.remove("pu-saved");
+    tr.querySelector(".pu-save").disabled = !dirty;
+    tr.querySelector(".pu-msg").textContent = "";
+  }
+
+  body.addEventListener("input", function (e) {
+    const tr = e.target.closest("tr"); if (tr) refresh(tr);
+  });
+  body.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" || !e.target.matches("input")) return;
+    e.preventDefault();
+    const tr = e.target.closest("tr");
+    if (tr && isDirty(tr)) startSave(tr);
+  });
+  body.addEventListener("click", function (e) {
+    const btn = e.target.closest(".pu-save");
+    if (btn) startSave(btn.closest("tr"));
+  });
+
+  // ---- confirmation pop-up for already-priced rows ----
+  const modalEl = document.getElementById("puConfirm");
+  let pending = null;
+  function money(v) { return v === "" ? "—" : "$" + v; }
+  function esc(t) { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; }
+  function askConfirm(tr) {
+    const v = vals(tr), unit = tr.dataset.unit;
+    document.getElementById("puConfirmItem").textContent = tr.dataset.label;
+    const rows = [];
+    if (v.vendor !== tr.dataset.origVendor)
+      rows.push(["Vendor", tr.dataset.origVendor || "—", v.vendor || "—"]);
+    if (String(parseFloat(v.price)) !== tr.dataset.origPrice)
+      rows.push(["Price / " + unit, money(tr.dataset.origPrice), money(String(parseFloat(v.price)))]);
+    document.getElementById("puConfirmRows").innerHTML = rows.map(r =>
+      "<tr><th>" + esc(r[0]) + "</th><td>" + esc(r[1]) + "</td><td class='fw-semibold'>" + esc(r[2]) + "</td></tr>").join("");
+    pending = tr;
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  }
+  document.getElementById("puConfirmBtn").addEventListener("click", function () {
+    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    if (pending) save(pending, true);
+    pending = null;
+  });
+
+  function startSave(tr) {
+    const v = vals(tr), msg = tr.querySelector(".pu-msg");
+    if (!v.vendor) { msg.textContent = "Enter the vendor."; return; }
+    if (v.price === "" || isNaN(parseFloat(v.price)) || parseFloat(v.price) < 0) { msg.textContent = "Enter a price."; return; }
+    if (tr.dataset.priced === "1") askConfirm(tr);
+    else save(tr, false);
+  }
+
+  function save(tr, confirmed) {
+    const v = vals(tr), btn = tr.querySelector(".pu-save"), msg = tr.querySelector(".pu-msg");
+    btn.disabled = true; btn.textContent = "Saving…";
+    fetch(tr.dataset.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vendor: v.vendor, unit_price: v.price, confirm: confirmed ? "1" : "" }),
+    })
+      .then(r => r.json().then(j => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => {
+        btn.textContent = "Save";
+        if (!ok) { msg.textContent = j.error || "Couldn't save."; btn.disabled = false; return; }
+        const rec = j.receipt;
+        tr.dataset.priced = "1";
+        tr.dataset.origVendor = rec.vendor || "";
+        tr.dataset.origPrice = String(parseFloat(rec.unit_price));
+        tr.querySelector(".pu-priced").textContent = rec.priced_date || "—";
+        tr.querySelector(".pu-priced").title = rec.priced_by ? "by " + rec.priced_by : "";
+        refresh(tr);
+        tr.classList.add("pu-saved");
+      })
+      .catch(() => { btn.textContent = "Save"; btn.disabled = false; msg.textContent = "Couldn't reach the server."; });
+  }
+})();
+</script>
+{% endblock %}

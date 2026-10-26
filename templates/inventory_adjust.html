@@ -103,6 +103,7 @@
   }
   .af-section-head .af-section-title { font-weight: 600; }
   .af-section-head .af-section-note { color: #6b7280; font-size: .825rem; }
+  .af-req-note { color: #6b7280; font-weight: 400; font-size: .8rem; }
   .af-section-sub { color: #6b7280; font-size: .875rem; margin-bottom: 10px; }
 
   /* ---- Radio groups ---- */
@@ -365,11 +366,19 @@
           </div>
         </div>
 
+        <!-- At least one of PO # / BOL # is required; Purchasing prices the load later by these -->
         <div class="af-row">
           <div class="af-field">
-            <label>Cost per unit *</label>
-            <input type="number" step="0.0001" min="0" name="receive_unit_cost" value="{{ form.get('receive_unit_cost','') }}" required>
+            <label for="rcvPo">PO # <span class="af-req-note">(PO or BOL required)</span></label>
+            <input id="rcvPo" name="po_number" value="{{ form.get('po_number','') }}" autocomplete="off">
           </div>
+          <div class="af-field">
+            <label for="rcvBol">BOL #</label>
+            <input id="rcvBol" name="bol_number" value="{{ form.get('bol_number','') }}" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="af-row">
           <div class="af-field">
             <label>Notes</label>
             <input name="notes" value="{{ form.get('notes','') }}">
@@ -2243,4 +2252,17 @@
   showTab((window.NStockTabs && window.NStockTabs.load('adjust')) || 'receive');
 </script>
 
+<script>
+  // PO # or BOL # — at least one is required (the server checks too)
+  document.querySelectorAll('input[name="po_number"]').forEach(function (po) {
+    const bol = po.form && po.form.querySelector('input[name="bol_number"]');
+    if (!bol) return;
+    function check() {
+      po.setCustomValidity(po.value.trim() || bol.value.trim() ? "" : "Enter a PO # or a BOL # (or both).");
+    }
+    po.addEventListener("input", check);
+    bol.addEventListener("input", check);
+    check();
+  });
+</script>
 {% endblock %}

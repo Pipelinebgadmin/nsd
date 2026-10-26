@@ -42,6 +42,8 @@ PACKAGE_INVENTORY_PATH = os.path.join(DATA_DIR, "package_inventory.json")
 TANKS_PATH = os.path.join(DATA_DIR, "tanks.json")
 TANK_LEDGER_PATH = os.path.join(DATA_DIR, "tank_ledger.json")
 EVENT_LEDGER_PATH = os.path.join(DATA_DIR, "event_ledger.json")
+PURCHASING_PATH = os.path.join(DATA_DIR, "purchasing.json")    # one record per receipt (PO/BOL, vendor, price)
+BLEND_COSTS_PATH = os.path.join(DATA_DIR, "blend_costs.json")  # what each blend batch was made from, for re-costing
 
 TANK_CAPACITY_UNIT = "gal"  # capacity is always gallons
 
@@ -337,6 +339,7 @@ FEATURES = [
     ("packages",         "Packages",              "Manage package types"),
     ("spreadsheet",      "Spreadsheet",           "Use the spreadsheet"),
     ("reports",          "Reports",               "View and print reports"),
+    ("purchasing",       "Purchasing",            "Enter the vendor and price for received loads (this is where inventory cost comes from)"),
     ("costs",            "Costs & Values",        "See unit costs, inventory value, cost of goods, and blend/formula costs"),
     ("ledger",           "Event Ledger",          "View the audit ledger (still needs the ledger password)"),
 ]
@@ -344,7 +347,7 @@ FEATURE_KEYS = [f[0] for f in FEATURES]
 # New users start with everything except the ledger; the admin adjusts from there.
 # Quick Build and the ledger are opt-in: an admin turns them on per user.
 # Quick Build, the ledger, and money (Costs & Values) are opt-in: an admin turns them on per user.
-DEFAULT_FEATURES = [k for k in FEATURE_KEYS if k not in ("ledger", "blend_builder", "costs")]
+DEFAULT_FEATURES = [k for k in FEATURE_KEYS if k not in ("ledger", "blend_builder", "costs", "purchasing")]
 
 # Which feature(s) unlock each page. A user needs ANY one of the listed features.
 # Pages shared by several screens (like the inventory API) list every screen that uses them.
@@ -428,6 +431,8 @@ ENDPOINT_FEATURES = {
     "report_avg_cost_pdf": {"reports"},
     "report_blend_cost": {"reports"},
     "report_blend_cost_pdf": {"reports"},
+    "purchasing_page": {"purchasing"},
+    "purchasing_price": {"purchasing"},
     "event_ledger_page": {"ledger"},
     "event_ledger_lock": {"ledger"},
 }
@@ -2091,7 +2096,7 @@ def _ensure_layers(prod: dict):
             continue
 
         if q > 0:
-            cleaned.append(
+            cleaned.append(_with_src(
                 {
                     "qty": round(q, 4),
                     "unit": normalize_unit(l.get("unit") or prod.get("default_unit")),
@@ -2104,11 +2109,28 @@ def _ensure_layers(prod: dict):
                         or central_time_now_str()
                     ),
                     "location": (l.get("location") or base_loc).strip() or "UNASSIGNED",
-                }
-            )
+                },
+                l,
+            ))
 
     prod["layers"] = cleaned
 
+
+
+def _with_src(layer: dict, origin: dict) -> dict:
+    """Copy the cost-source tag (src / cost_pending) from origin onto layer.
+
+    src names where the stock's cost comes from: a receipt (RCV-000001) the
+    purchaser prices later, or a blend batch (BLD-...) costed from its
+    ingredients. It stays with the stock through moves, issues and undo so a
+    price entered later reaches every bit of that load still on hand.
+    """
+    src = (origin or {}).get("src")
+    if src:
+        layer["src"] = src
+        if (origin or {}).get("cost_pending"):
+            layer["cost_pending"] = True
+    return layer
 
 
 def _layers_total_qty(prod: dict) -> float:
@@ -2131,7 +2153,8 @@ def _sync_product_qty_and_avg_cost_from_layers(prod: dict):
     prod["unit_cost"] = round(float(avg), 4)
 
 
-def fifo_receive(prod: dict, qty_default: float, recv_cost: float, location: str | None = None):
+def fifo_receive(prod: dict, qty_default: float, recv_cost: float, location: str | None = None,
+                 src: str | None = None, cost_pending: bool = False):
     _ensure_layers(prod)
     qty_default = float(qty_default)
     recv_cost = float(recv_cost)
@@ -2142,27 +2165,29 @@ def fifo_receive(prod: dict, qty_default: float, recv_cost: float, location: str
     if not loc:
         raise ValueError(f"A location is required to receive {prod.get('name') or 'inventory'}.")
 
-    prod["layers"].append(
+    prod["layers"].append(_with_src(
         {
             "qty": round(qty_default, 4),
             "unit": normalize_unit(prod.get("default_unit")),
             "unit_cost": round(recv_cost, 4),
             "datetime": now_central_iso(),
             "location": loc,
-        }
-    )
+        },
+        {"src": src, "cost_pending": cost_pending},
+    ))
     _sync_product_qty_and_avg_cost_from_layers(prod)
 
-    append_ledger_entry(
-        "receive",
-        {
-            "product_id": prod.get("id"),
-            "product_name": prod.get("product") or prod.get("name"),
-            "qty": round(qty_default, 4),
-            "unit_cost": round(recv_cost, 4),
-            "location": loc,
-        },
-    )
+    payload = {
+        "product_id": prod.get("id"),
+        "product_name": prod.get("product") or prod.get("name"),
+        "qty": round(qty_default, 4),
+        "unit_cost": round(recv_cost, 4),
+        "location": loc,
+    }
+    if src:
+        payload["src"] = src
+        payload["cost_pending"] = bool(cost_pending)
+    append_ledger_entry("receive", payload)
 
 
 
@@ -2186,8 +2211,8 @@ def fifo_issue(prod: dict, qty_default: float) -> dict:
         layer_cost = float(layer["unit_cost"])
 
         take = min(layer_qty, remaining)
-        pulls.append({"qty": round(take, 4), "unit_cost": round(layer_cost, 4),
-                      "location": layer.get("location")})
+        pulls.append(_with_src({"qty": round(take, 4), "unit_cost": round(layer_cost, 4),
+                                "location": layer.get("location")}, layer))
         issued_value += take * layer_cost
 
         layer["qty"] = layer_qty - take
@@ -2240,19 +2265,19 @@ def fifo_return(prod: dict, pulls: list, location: str | None = None):
         loc = (p.get("location") or "").strip() or base_loc
         if not loc:
             raise ValueError(f"Can't tell which location to return {prod.get('name') or 'inventory'} to.")
-        back.append((q, c, loc))
+        back.append((q, c, loc, p))
 
     # insert oldest-last so the returned layers keep their original FIFO order at the front
-    for q, c, loc in reversed(back):
+    for q, c, loc, p in reversed(back):
         prod["layers"].insert(
             0,
-            {
+            _with_src({
                 "qty": round(q, 4),
                 "unit": unit,
                 "unit_cost": round(c, 4),
                 "datetime": now_central_iso(),
                 "location": loc,
-            },
+            }, p),
         )
 
     _sync_product_qty_and_avg_cost_from_layers(prod)
@@ -2290,8 +2315,8 @@ def fifo_issue_from_location(prod: dict, qty_default: float, location_name: str)
         layer_cost = float(layer["unit_cost"])
 
         take = min(layer_qty, remaining)
-        pulls.append({"qty": round(take, 4), "unit_cost": round(layer_cost, 4),
-                      "location": layer.get("location")})
+        pulls.append(_with_src({"qty": round(take, 4), "unit_cost": round(layer_cost, 4),
+                                "location": layer.get("location")}, layer))
 
         issued_value += take * layer_cost
         layer["qty"] = layer_qty - take
@@ -2323,6 +2348,206 @@ def fifo_issue_from_location(prod: dict, qty_default: float, location_name: str)
         "pulls": pulls,
         "effective_unit_cost": round(eff_cost, 4),
     }
+
+# -------------------------
+# Purchasing: receipts and cost sources
+# -------------------------
+# Receiving no longer asks for a cost. Each receive makes a receipt (RCV-000001)
+# with its PO/BOL, and its stock comes in unpriced at $0, tagged src=<receipt id>.
+# The purchaser later enters the vendor and price per unit on the Purchasing
+# page; that price then reaches every layer still tagged with the receipt.
+# A blend batch is tagged src=BLD-<id>, and blend_costs.json remembers which
+# sources it was made from, so its cost is worked out again when an ingredient
+# gets priced (blends of blends included).
+
+def load_purchasing():
+    return load_json(PURCHASING_PATH, [])
+
+
+def load_blend_costs():
+    return load_json(BLEND_COSTS_PATH, {})
+
+
+def next_receipt_id(receipts):
+    n = 0
+    for r in receipts:
+        rid = str(r.get("id", ""))
+        if rid.startswith("RCV-") and rid[4:].isdigit():
+            n = max(n, int(rid[4:]))
+    return f"RCV-{n + 1:06d}"
+
+
+def parse_po_bol(form):
+    """(po, bol, error). At least one of PO # / BOL # is required."""
+    po = (form.get("po_number") or "").strip()
+    bol = (form.get("bol_number") or "").strip()
+    if not po and not bol:
+        return po, bol, "Enter a PO # or a BOL # (or both) so this receipt can be identified later."
+    return po, bol, None
+
+
+def new_receipt(receipts, prod, qty, unit, qty_default, location_name, location_id, po, bol, tank_names=None):
+    """Build a receipt record. The caller appends it (with save_purchasing) once the receive went through."""
+    user = current_user() or {}
+    return {
+        "id": next_receipt_id(receipts),
+        "status": "open",
+        "received_at": now_central_iso(),
+        "received_by": user.get("username"),
+        "po_number": po,
+        "bol_number": bol,
+        "product_id": str(prod.get("id")),
+        "product_name": prod.get("name"),
+        "qty": round(float(qty), 4),
+        "unit": normalize_unit(unit),
+        "qty_default": round(float(qty_default), 4),
+        "default_unit": normalize_unit(prod.get("default_unit")),
+        "location": location_name,
+        "location_id": location_id,
+        "tanks": tank_names or [],
+        "vendor": None,
+        "unit_price": None,       # per the unit received (qty/unit above)
+        "unit_cost": None,        # same price per the product's own unit, what the FIFO layers use
+        "priced_at": None,
+        "priced_by": None,
+        "history": [],
+    }
+
+
+def receive_unpriced(prod, qty_default, location_name, receipt):
+    """FIFO receive for a purchase: $0 for now, tagged with the receipt so its price can be filled in later."""
+    fifo_receive(prod, qty_default, 0.0, location=location_name, src=receipt["id"], cost_pending=True)
+
+
+def register_blend_source(pulls, out_qty_default, blend_log_id=None, overage_pulls=None):
+    """Remember what a blend batch was made of. Returns (src, cost_pending) for its output layer.
+
+    pulls: [(product, [pull, ...]), ...] as the blend functions collect them.
+    """
+    src = f"BLD-{uuid.uuid4().hex[:12]}"
+
+    def flat(groups):
+        out = []
+        for prod, plist in groups or []:
+            for p in plist or []:
+                row = {"product_id": str(prod.get("id")), "qty": float(p.get("qty") or 0.0),
+                       "unit_cost": float(p.get("unit_cost") or 0.0)}
+                if p.get("src"):
+                    row["src"] = p["src"]
+                out.append(row)
+        return out
+
+    inputs = flat(pulls)
+    pending = any(p.get("cost_pending") for _, plist in (pulls or []) for p in (plist or []))
+    costs = load_blend_costs()
+    costs[src] = {
+        "created_at": now_central_iso(),
+        "out_qty": round(float(out_qty_default), 6),
+        "inputs": inputs,
+        "overage_inputs": flat(overage_pulls),
+        "blend_log_id": blend_log_id,
+    }
+    save_json(BLEND_COSTS_PATH, costs)
+    return src, pending
+
+
+def source_costs(receipts=None, blend_costs=None):
+    """{src: (unit_cost per product unit, cost_pending)} for every receipt and blend batch."""
+    receipts = load_purchasing() if receipts is None else receipts
+    blend_costs = load_blend_costs() if blend_costs is None else blend_costs
+    out = {}
+    for r in receipts:
+        priced = r.get("unit_cost") is not None
+        out[r["id"]] = (float(r.get("unit_cost") or 0.0), not priced)
+
+    def input_value(rows, seen):
+        value, pending = 0.0, False
+        for row in rows:
+            cost, pend = float(row.get("unit_cost") or 0.0), False
+            if row.get("src"):
+                cost, pend = resolve(row["src"], seen)
+            value += float(row.get("qty") or 0.0) * cost
+            pending = pending or pend
+        return value, pending
+
+    def resolve(src, seen):
+        if src in out:
+            return out[src]
+        b = blend_costs.get(src)
+        if b is None or src in seen:
+            return (0.0, False) if b is None else (0.0, True)
+        value, pending = input_value(b.get("inputs") or [], seen | {src})
+        qty = float(b.get("out_qty") or 0.0)
+        out[src] = ((value / qty) if qty > 0 else 0.0, pending)
+        return out[src]
+
+    for src in blend_costs:
+        resolve(src, frozenset())
+    return out
+
+
+def _inputs_value(rows, costs):
+    """(total value, any unpriced) of blend input rows at the costs from source_costs()."""
+    value, pending = 0.0, False
+    for row in rows or []:
+        cost, pend = float(row.get("unit_cost") or 0.0), False
+        if row.get("src") in costs:
+            cost, pend = costs[row["src"]]
+        value += float(row.get("qty") or 0.0) * cost
+        pending = pending or pend
+    return value, pending
+
+
+def recost_everything(products, receipts, blend_costs, blends_log):
+    """Push current receipt prices into every tagged layer and every blend batch built from them.
+
+    Edits products and blends_log in place. Returns how many layers changed.
+    """
+    costs = source_costs(receipts, blend_costs)
+    changed = 0
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        touched = False
+        for l in p.get("layers") or []:
+            src = l.get("src")
+            if not src or src not in costs:
+                continue
+            cost, pending = costs[src]
+            new_cost = round(cost, 4)
+            if float(l.get("unit_cost") or 0.0) != new_cost or bool(l.get("cost_pending")) != pending:
+                l["unit_cost"] = new_cost
+                if pending:
+                    l["cost_pending"] = True
+                else:
+                    l.pop("cost_pending", None)
+                touched = True
+                changed += 1
+        if touched:
+            _sync_product_qty_and_avg_cost_from_layers(p)
+
+    # Blend Log entries show the batch's cost: keep them in step
+    by_log_id = {b.get("blend_log_id"): (src, b) for src, b in blend_costs.items() if b.get("blend_log_id")}
+    for entry in blends_log:
+        hit = by_log_id.get(entry.get("id"))
+        if not hit:
+            continue
+        src, b = hit
+        value, pending = _inputs_value(b.get("inputs"), costs)
+        over_value, over_pending = _inputs_value(b.get("overage_inputs"), costs)
+        total_gal = float(entry.get("total_gal") or 0.0)
+        entry["total_cost"] = round(value, 4)
+        entry["cost_per_gal"] = round(value / total_gal, 4) if total_gal > 0 else 0.0
+        entry["overage_cost"] = round(over_value, 4)
+        entry["cost_pending"] = bool(pending or over_pending)
+        for comp in entry.get("components") or []:
+            pid = str(comp.get("product_id"))
+            comp["cost"] = round(_inputs_value(
+                [i for i in b.get("inputs") or [] if i.get("product_id") == pid], costs)[0], 4)
+            comp["overage_cost"] = round(_inputs_value(
+                [i for i in b.get("overage_inputs") or [] if i.get("product_id") == pid], costs)[0], 4)
+    return changed
+
 
 def _apply_package_rows_to_blend(blend_product, package_rows, location_id, location_name, finished_qty_gal, notes=None):
     """
@@ -2491,6 +2716,7 @@ def execute_formula_blend(products: list, formula: dict, batch_qty: float, batch
 
     cost_per_gal = (total_cost_value / total_gal) if total_gal > 0 else 0.0
     cost_per_gal = round(float(cost_per_gal), 4)
+    blend_src, blend_pending = register_blend_source(pulls_for_rollback, total_gal)
 
     # ---- Create/update finished blend product ----
     blend_name = (formula.get("name") or "Blend").strip()
@@ -2515,7 +2741,8 @@ def execute_formula_blend(products: list, formula: dict, batch_qty: float, batch
             existing["weight"] = round(float(blend_lb_per_gal), 6)
 
         # add new FIFO layer at actual cost/gal
-        fifo_receive(existing, finished_qty_gal, cost_per_gal, location=blend_loc)
+        fifo_receive(existing, finished_qty_gal, cost_per_gal, location=blend_loc,
+                     src=blend_src, cost_pending=blend_pending)
 
         blend_product = existing
         created_new = False
@@ -2538,7 +2765,8 @@ def execute_formula_blend(products: list, formula: dict, batch_qty: float, batch
             "last_updated": now,
             "layers": [],
         }
-        fifo_receive(blend_product, finished_qty_gal, cost_per_gal, location=blend_loc)
+        fifo_receive(blend_product, finished_qty_gal, cost_per_gal, location=blend_loc,
+                     src=blend_src, cost_pending=blend_pending)
         products.append(blend_product)
         created_new = True
 
@@ -2988,6 +3216,7 @@ def execute_sourced_formula_blend(products, formula, batch_qty, batch_unit, loca
 
     # ---------- 2. Pull from FIFO at this location ----------
     pulls_for_rollback = []
+    main_pulls, overage_pulls = [], []   # kept apart so the blend's cost can be redone later
     blend_cost = 0.0
     overage_cost_total = 0.0
     try:
@@ -2995,12 +3224,14 @@ def execute_sourced_formula_blend(products, formula, batch_qty, batch_unit, loca
             prod = r["product"]
             used = fifo_issue_from_location(prod, r["needed_default_qty"], location_name)
             pulls_for_rollback.append((prod, used.get("pulls") or []))
+            main_pulls.append((prod, used.get("pulls") or []))
             r["cost"] = round(float(used["issued_value"] or 0.0), 4)
             blend_cost += r["cost"]
             r["overage_cost"] = 0.0
             if r["overage_gal"] > 0:
                 extra = fifo_issue_from_location(prod, _gal_to_default_qty(prod, r["overage_gal"]), location_name)
                 pulls_for_rollback.append((prod, extra.get("pulls") or []))
+                overage_pulls.append((prod, extra.get("pulls") or []))
                 r["overage_cost"] = round(float(extra["issued_value"] or 0.0), 4)
                 overage_cost_total += r["overage_cost"]
     except Exception:
@@ -3040,6 +3271,7 @@ def execute_sourced_formula_blend(products, formula, batch_qty, batch_unit, loca
     except Exception:
         lb_per_gal = None
     cost_per_gal = round(blend_cost / total_gal, 4) if total_gal > 0 else 0.0
+    log_id = str(uuid.uuid4())
 
     blend_name = (formula.get("name") or "Blend").strip()
     existing = next((p for p in products if (p.get("name") or "").strip().lower() == blend_name.lower()), None)
@@ -3058,7 +3290,11 @@ def execute_sourced_formula_blend(products, formula, batch_qty, batch_unit, loca
             "notes": "Auto-generated blend", "last_updated": now, "layers": [],
         }
         products.append(blend_product)
-    fifo_receive(blend_product, _gal_to_default_qty(blend_product, total_gal), cost_per_gal, location=location_name)
+    out_qty = _gal_to_default_qty(blend_product, total_gal)
+    blend_src, blend_pending = register_blend_source(main_pulls, out_qty, blend_log_id=log_id,
+                                                     overage_pulls=overage_pulls)
+    fifo_receive(blend_product, out_qty, cost_per_gal, location=location_name,
+                 src=blend_src, cost_pending=blend_pending)
 
     # Record the part of the batch that went straight into packages (the rest stays unpackaged)
     if out_rows:
@@ -3072,7 +3308,7 @@ def execute_sourced_formula_blend(products, formula, batch_qty, batch_unit, loca
     log = load_blends()
     next_no = max([int(b.get("number") or 0) for b in log] + [0]) + 1
     entry = {
-        "id": str(uuid.uuid4()),
+        "id": log_id,
         "number": next_no,
         "date": now,
         "location_id": location_id,
@@ -3086,6 +3322,7 @@ def execute_sourced_formula_blend(products, formula, batch_qty, batch_unit, loca
         "cost_per_gal": cost_per_gal,
         "total_cost": round(blend_cost, 4),
         "overage_cost": round(overage_cost_total, 4),
+        "cost_pending": blend_pending or any(p.get("cost_pending") for _, pl in overage_pulls for p in pl),
         "packaged": [{"package_name": o["package_name"], "qty": o["qty"]} for o in out_rows],
         "packaged_gal": out_gal,
         "out_tank": ({"name": out_tank["name"], "gal": out_tank["gal"]} if out_tank else None),
@@ -3276,6 +3513,7 @@ def execute_builder_blend(products: list, name: str, target_qty: float, target_u
 
     cost_per_gal = (total_cost_value / total_gal) if total_gal > 0 else 0.0
     cost_per_gal = round(float(cost_per_gal), 4)
+    blend_src, blend_pending = register_blend_source(pulls_for_rollback, total_gal)
 
     # --- Create/update finished blend product + receive layer ---
     blend_name = name
@@ -3293,7 +3531,8 @@ def execute_builder_blend(products: list, name: str, target_qty: float, target_u
         if blend_lb_per_gal:
             existing["weight"] = round(float(blend_lb_per_gal), 6)
 
-        fifo_receive(existing, finished_qty_gal, cost_per_gal, location=blend_loc)
+        fifo_receive(existing, finished_qty_gal, cost_per_gal, location=blend_loc,
+                     src=blend_src, cost_pending=blend_pending)
         blend_product = existing
     else:
         blend_product = {
@@ -3311,7 +3550,8 @@ def execute_builder_blend(products: list, name: str, target_qty: float, target_u
             "cost": 0.0,
         }
         products.append(blend_product)
-        fifo_receive(blend_product, finished_qty_gal, cost_per_gal, location=blend_loc)
+        fifo_receive(blend_product, finished_qty_gal, cost_per_gal, location=blend_loc,
+                     src=blend_src, cost_pending=blend_pending)
 
     # ---- Optionally record part of this finished batch as packaged ----
     # (does not touch bulk FIFO — see _apply_package_rows_to_blend)
@@ -4378,11 +4618,13 @@ def inventory_receive_page():
         unit_in = normalize_unit((request.form.get("unit") or "").strip().lower())
         location_id = (request.form.get("location_id") or "").strip()
         tank_id = (request.form.get("tank_id") or "").strip() or None
-        ref = (request.form.get("ref") or "").strip() or None
         notes = (request.form.get("notes") or "").strip() or None
-        receive_cost_raw = (request.form.get("receive_unit_cost") or "").strip()
+        po, bol, po_bol_error = parse_po_bol(request.form)
+        ref = " / ".join(x for x in (po and f"PO {po}", bol and f"BOL {bol}") if x) or None
 
         errors = []
+        if po_bol_error:
+            errors.append(po_bol_error)
 
         prod = next((p for p in products if str(p.get("id")) == str(product_id)), None)
         if not prod:
@@ -4402,14 +4644,6 @@ def inventory_receive_page():
         # We only allow GAL/LB for tank receive (since tanks are liquids)
         if unit_in not in ("gal", "lb"):
             errors.append("Unit must be GAL or LB for tank receipts.")
-
-        # Receive cost (keep consistent with FIFO receive)
-        try:
-            recv_cost = float(receive_cost_raw)
-            if recv_cost < 0:
-                errors.append("Cost must be ≥ 0.")
-        except ValueError:
-            errors.append("Cost must be a number.")
 
         # Validate tank belongs to selected location
         if tank_id:
@@ -4453,7 +4687,11 @@ def inventory_receive_page():
 
         # Use location name for FIFO layer location (keeps your current location rollups working)
         effective_location = (loc.get("name") or "").strip() or None
-        fifo_receive(prod, qty_default, recv_cost, location=effective_location)
+        receipts = load_purchasing()
+        tank_names = [get_tank_by_id(load_tanks(), tank_id).get("name")] if tank_id else []
+        receipt = new_receipt(receipts, prod, qty, unit_in, qty_default, effective_location, location_id,
+                              po, bol, tank_names)
+        receive_unpriced(prod, qty_default, effective_location, receipt)
 
         # ---- Optional tank ledger write (in gallons) ----
         if tank_id:
@@ -4486,8 +4724,10 @@ def inventory_receive_page():
 
         prod["last_updated"] = now_central_iso()
         save_products(products)
+        receipts.append(receipt)
+        save_json(PURCHASING_PATH, receipts)
 
-        flash("Inventory received successfully.", "success")
+        flash(f"Inventory received ({receipt['id']}). It's unpriced until Purchasing enters the price.", "success")
         return redirect(url_for("inventory_receive_page"))
 
     return render_template(
@@ -5006,7 +5246,7 @@ def inventory_adjust_page():
 
                 if remaining > 1e-12 and loc.lower() == from_loc_name.lower() and lqty > 0:
                     take = min(lqty, remaining)
-                    pulls.append({"qty": take, "unit_cost": lcost})
+                    pulls.append(_with_src({"qty": take, "unit_cost": lcost}, layer))
                     lqty -= take
                     remaining -= take
 
@@ -5028,13 +5268,13 @@ def inventory_adjust_page():
 
             # Add moved qty into destination layers (preserve costs)
             for p_pull in pulls:
-                new_layers.append({
+                new_layers.append(_with_src({
                     "qty": round(float(p_pull["qty"]), 4),
                     "unit": normalize_unit(prod.get("default_unit")),
                     "unit_cost": round(float(p_pull["unit_cost"]), 4),
                     "datetime": central_time_now_str(),
                     "location": to_loc_name,
-                })
+                }, p_pull))
 
             prod["layers"] = new_layers
             _sync_product_qty_and_avg_cost_from_layers(prod)
@@ -5466,8 +5706,6 @@ def inventory_adjust_page():
         # -------------------------
         # ADD / REMOVE FLOW (UPDATED for location_id)
         # -------------------------
-        receive_cost_raw = (request.form.get("receive_unit_cost") or "").strip()
-
         # HTML uses location_id for Receive + Remove
         location_id = (request.form.get("location_id") or "").strip() or None
         effective_location = loc_name_from_id(location_id) if location_id else None
@@ -5579,14 +5817,11 @@ def inventory_adjust_page():
             except Exception as e:
                 errors.append(str(e))
 
-        recv_cost = None
+        po = bol = None
         if action == "add":
-            try:
-                recv_cost = float(receive_cost_raw)
-                if recv_cost < 0:
-                    errors.append("Cost must be ≥ 0.")
-            except ValueError:
-                errors.append("Cost must be a number.")
+            po, bol, po_bol_error = parse_po_bol(request.form)
+            if po_bol_error:
+                errors.append(po_bol_error)
 
         # ---- Tanks show up as "package" options (value "tank:<id>", amount in gallons) ----
         # Receive: rows can put gallons into tanks. Remove by package: rows can pull gallons out of tanks.
@@ -5770,8 +6005,11 @@ def inventory_adjust_page():
             verb = "Removed"
             sign = "-"
         else:
-            # receive into chosen location
-            fifo_receive(prod, qty_default, recv_cost, location=effective_location)
+            # receive into chosen location (unpriced until Purchasing enters the price)
+            receipts = load_purchasing()
+            receipt = new_receipt(receipts, prod, qty, unit, qty_default, effective_location, location_id,
+                                  po, bol, [trow["name"] for trow, _ in tank_moves])
+            receive_unpriced(prod, qty_default, effective_location, receipt)
             _sync_product_qty_and_avg_cost_from_layers(prod)
 
             # ---- Package inventory records (multiple rows, optional) ----
@@ -5823,6 +6061,9 @@ def inventory_adjust_page():
             if tank_moves:
                 flash(f"Received {prod.get('name')}: " + ", ".join(f"{g:g} gal into {t['name']}" for t, g in tank_moves) + ".",
                       "success")
+            receipts.append(receipt)
+            save_json(PURCHASING_PATH, receipts)
+            flash(f"Receipt {receipt['id']} is unpriced until Purchasing enters the price.", "info")
 
             verb = "Received"
             sign = "+"
@@ -7014,13 +7255,17 @@ def receive_inventory(product_id):
 
     try:
         recv_qty = float((request.form.get("receive_qty") or "0").strip())
-        recv_cost = float((request.form.get("receive_unit_cost") or "0").strip())
     except ValueError:
-        flash("Invalid quantity or cost.", "danger")
+        flash("Invalid quantity.", "danger")
         return redirect(url_for("product_detail", product_id=product_id))
 
-    if recv_qty <= 0 or recv_cost < 0:
-        flash("Quantity must be > 0 and cost must be ≥ 0.", "danger")
+    if recv_qty <= 0:
+        flash("Quantity must be > 0.", "danger")
+        return redirect(url_for("product_detail", product_id=product_id))
+
+    po, bol, po_bol_error = parse_po_bol(request.form)
+    if po_bol_error:
+        flash(po_bol_error, "danger")
         return redirect(url_for("product_detail", product_id=product_id))
 
     # Every receive must land at a real location (never "Unassigned")
@@ -7034,7 +7279,10 @@ def receive_inventory(product_id):
     migrate_products_to_layers(products)
 
     # receive_qty is assumed to be in product default unit (same as your UI currently)
-    fifo_receive(p, recv_qty, recv_cost, location=effective_location)
+    receipts = load_purchasing()
+    receipt = new_receipt(receipts, p, recv_qty, p.get("default_unit"), recv_qty, effective_location,
+                          location_id, po, bol)
+    receive_unpriced(p, recv_qty, effective_location, receipt)
 
     # keep the product's own location in sync (optional but nice)
     if effective_location:
@@ -7043,15 +7291,110 @@ def receive_inventory(product_id):
     p["last_updated"] = central_time_now_str()
 
     save_products(products)
+    receipts.append(receipt)
+    save_json(PURCHASING_PATH, receipts)
 
-    flash(
-        (f"Received {recv_qty} {p.get('default_unit','units')} at ${recv_cost}/unit. "
-         f"New avg cost: ${p.get('unit_cost')}/unit. On-hand: {p.get('quantity')}.")
-        if can_see_costs() else
-        f"Received {recv_qty} {p.get('default_unit','units')}. On-hand: {p.get('quantity')}.",
-        "success",
-    )
+    flash(f"Received {recv_qty} {p.get('default_unit','units')} ({receipt['id']}, unpriced). "
+          f"On-hand: {p.get('quantity')}.", "success")
     return redirect(url_for("product_detail", product_id=product_id))
+
+# -------------------------
+# Purchasing: price each receipt
+# -------------------------
+def _receipt_view(r):
+    d = r.get("received_at") or ""
+    p = r.get("priced_at") or ""
+    return {**r, "received_date": d[:10], "priced_date": p[:10]}
+
+
+@app.route("/purchasing")
+def purchasing_page():
+    show = request.args.get("show", "unpriced")
+    if show not in ("unpriced", "priced", "all"):
+        show = "unpriced"
+    user = current_user()
+    receipts = [r for r in load_purchasing() if r.get("status") != "undone"
+                and user_can_use_location(user, loc_id=r.get("location_id"), loc_name=r.get("location"))]
+    counts = {"unpriced": sum(1 for r in receipts if r.get("unit_price") is None)}
+    counts["priced"] = len(receipts) - counts["unpriced"]
+    counts["all"] = len(receipts)
+    if show == "unpriced":
+        receipts = [r for r in receipts if r.get("unit_price") is None]
+    elif show == "priced":
+        receipts = [r for r in receipts if r.get("unit_price") is not None]
+    receipts.sort(key=lambda r: r.get("received_at") or "", reverse=True)
+
+    vendors = {(v.get("name") or "").strip() for v in load_json(os.path.join(DATA_DIR, "vendors.json"), [])}
+    vendors |= {(r.get("vendor") or "").strip() for r in load_purchasing()}
+    return render_template("purchasing.html", app_title=APP_TITLE, show=show, counts=counts,
+                           receipts=[_receipt_view(r) for r in receipts],
+                           vendors=sorted(v for v in vendors if v))
+
+
+@app.post("/purchasing/<receipt_id>/price")
+def purchasing_price(receipt_id):
+    data = request.get_json(silent=True) or request.form
+    vendor = (data.get("vendor") or "").strip()
+    confirmed = str(data.get("confirm") or "") in ("1", "true", "True")
+    try:
+        price = float(str(data.get("unit_price") or "").strip())
+    except ValueError:
+        return jsonify({"error": "Price must be a number."}), 400
+    if price < 0:
+        return jsonify({"error": "Price can't be negative."}), 400
+    if not vendor:
+        return jsonify({"error": "Enter the vendor."}), 400
+
+    user = current_user() or {}
+    with inventory_lock():
+        receipts = load_purchasing()
+        r = next((x for x in receipts if x.get("id") == receipt_id), None)
+        if not r or r.get("status") == "undone":
+            return jsonify({"error": "That receipt wasn't found (it may have been undone)."}), 404
+        if not user_can_use_location(user, loc_id=r.get("location_id"), loc_name=r.get("location")):
+            return jsonify({"error": f"You aren't assigned to {r.get('location')}."}), 403
+
+        was_priced = r.get("unit_price") is not None
+        if was_priced and float(r["unit_price"]) == round(price, 4) and (r.get("vendor") or "") == vendor:
+            return jsonify({"ok": True, "receipt": _receipt_view(r), "unchanged": True})
+        if was_priced and not confirmed:
+            # the page shows its own confirmation first; this stops a change slipping through without one
+            return jsonify({"error": "Changing a saved price needs confirmation.", "needs_confirm": True}), 409
+
+        now = now_central_iso()
+        if was_priced:
+            r.setdefault("history", []).append({
+                "vendor": r.get("vendor"), "unit_price": r.get("unit_price"),
+                "priced_at": r.get("priced_at"), "priced_by": r.get("priced_by"),
+                "replaced_at": now, "replaced_by": user.get("username"),
+            })
+        qty, qty_default = float(r.get("qty") or 0.0), float(r.get("qty_default") or 0.0)
+        r.update({
+            "vendor": vendor,
+            "unit_price": round(price, 4),
+            "unit_cost": round(price * qty / qty_default, 6) if qty_default > 0 else round(price, 6),
+            "priced_at": now,
+            "priced_by": user.get("username"),
+        })
+
+        products = load_products()
+        migrate_products_to_layers(products)
+        blends_log = load_blends()
+        layers_changed = recost_everything(products, receipts, load_blend_costs(), blends_log)
+
+        ledger = load_ledger()
+        ledger.append(_build_ledger_entry(ledger, "purchase_price_changed" if was_priced else "purchase_priced", {
+            "receipt_id": r["id"], "po_number": r.get("po_number"), "bol_number": r.get("bol_number"),
+            "product_id": r.get("product_id"), "product_name": r.get("product_name"),
+            "vendor": vendor, "unit_price": r["unit_price"], "unit": r.get("unit"),
+            "previous_unit_price": r["history"][-1]["unit_price"] if was_priced else None,
+            "by": user.get("username"),
+        }))
+        _commit_files({PURCHASING_PATH: receipts, DATA_PATH: products, BLENDS_PATH: blends_log,
+                       EVENT_LEDGER_PATH: ledger})
+
+    return jsonify({"ok": True, "receipt": _receipt_view(r), "layers_changed": layers_changed})
+
 
 @app.post("/api/formulas/compute")
 def api_formula_compute():
@@ -8164,6 +8507,7 @@ def _gather_layer_rows(location_filter=None, start_date=None, end_date=None):
                 "qty": qty,
                 "unit_cost": cost,
                 "value": qty * cost,
+                "cost_pending": bool(layer.get("cost_pending")),  # not priced by Purchasing yet ($0)
                 "datetime": layer.get("datetime"),
                 "default_unit": default_unit,
                 "weight": p.get("weight"),
@@ -8191,10 +8535,12 @@ def build_inventory_value_report(location_filter, start_date, end_date):
         key = (r["product_id"], loc)
         bp = by_product.setdefault(key, {
             "product_id": r["product_id"], "product_name": r["product_name"], "location": loc,
-            "qty": 0.0, "value": 0.0, "unit": r["default_unit"],
+            "qty": 0.0, "value": 0.0, "unit": r["default_unit"], "unpriced_qty": 0.0,
         })
         bp["qty"] += r["qty"]
         bp["value"] += r["value"]
+        if r["cost_pending"]:
+            bp["unpriced_qty"] += r["qty"]
 
     locations_out = []
     for loc, d in by_location.items():
@@ -8212,11 +8558,13 @@ def build_inventory_value_report(location_filter, start_date, end_date):
         p["qty"] = round(p["qty"], 2)
         p["value"] = round(p["value"], 2)
         p["avg_cost"] = round(p["value"] / p["qty"], 4) if p["qty"] else 0.0
+        p["unpriced_qty"] = round(p["unpriced_qty"], 2)
     products_out.sort(key=lambda x: (x["location"].lower(), (x["product_name"] or "").lower()))
 
     grand_total = round(sum(d["value"] for d in locations_out), 2)
 
-    return {"locations": locations_out, "products": products_out, "grand_total": grand_total}
+    return {"locations": locations_out, "products": products_out, "grand_total": grand_total,
+            "unpriced_count": sum(1 for p in products_out if p["unpriced_qty"] > 0)}
 
 
 def build_avg_cost_report(location_filter, start_date, end_date):
@@ -8227,10 +8575,12 @@ def build_avg_cost_report(location_filter, start_date, end_date):
         pid = r["product_id"]
         bp = by_product.setdefault(pid, {
             "product_id": pid, "product_name": r["product_name"], "unit": r["default_unit"],
-            "total_qty": 0.0, "total_value": 0.0,
+            "total_qty": 0.0, "total_value": 0.0, "unpriced_qty": 0.0,
         })
         bp["total_qty"] += r["qty"]
         bp["total_value"] += r["value"]
+        if r["cost_pending"]:
+            bp["unpriced_qty"] += r["qty"]
 
     out = []
     for pid, d in by_product.items():
@@ -8242,6 +8592,7 @@ def build_avg_cost_report(location_filter, start_date, end_date):
             "total_qty": round(d["total_qty"], 2),
             "avg_unit_cost": round(avg_cost, 4),
             "total_value": round(d["total_value"], 2),
+            "unpriced_qty": round(d["unpriced_qty"], 2),
         })
     out.sort(key=lambda x: (x["product_name"] or "").lower())
 
@@ -8249,7 +8600,8 @@ def build_avg_cost_report(location_filter, start_date, end_date):
     company_total_value = sum(x["total_value"] for x in out)
     company_avg = (company_total_value / company_total_qty) if company_total_qty else 0.0
 
-    return {"products": out, "company_avg_cost": round(company_avg, 4)}
+    return {"products": out, "company_avg_cost": round(company_avg, 4),
+            "unpriced_count": sum(1 for x in out if x["unpriced_qty"] > 0)}
 
 
 def compute_formula_current_cost(formula, products_by_id, batch_gal=100.0):
@@ -8303,6 +8655,9 @@ def build_blend_cost_report(formula_ids=None):
             "batch_cost": result["batch_cost"],
             "batch_gal": result["batch_gal"],
             "missing_products": result["missing_products"],
+            # components with stock Purchasing hasn't priced yet ($0 pulls their average down)
+            "unpriced_products": [r["product"].get("name") for r in result["rows"]
+                                  if any(l.get("cost_pending") for l in r["product"].get("layers") or [])],
             "components": [
                 {
                     "product_name": r["product"].get("name"),
@@ -8432,6 +8787,14 @@ def _build_pdf_buffer(build_fn):
     return buf
 
 
+def _unpriced_note(data):
+    n = data.get("unpriced_count") or 0
+    if not n:
+        return []
+    return [f'<font color="#b45309">* {n} product{"s" if n != 1 else ""} include stock not yet priced by '
+            f'Purchasing (counted at $0 until it is).</font>']
+
+
 def pdf_inventory_value(data, location, start_date_str, end_date_str):
     from reportlab.platypus import Paragraph, Spacer
 
@@ -8440,7 +8803,7 @@ def pdf_inventory_value(data, location, start_date_str, end_date_str):
         _pdf_header(elements, styles, "Total Inventory Value Report", [
             _report_scope_line(location, start_date_str, end_date_str),
             f"Generated {now_central_str()}",
-        ])
+        ] + _unpriced_note(data))
 
         rows = [["Location", "Gallons", "Pounds", "SKUs", "Value"]]
         for l in data["locations"]:
@@ -8458,7 +8821,7 @@ def pdf_inventory_value(data, location, start_date_str, end_date_str):
         prow = [["Product", "Location", "Qty", "Avg Cost", "Value"]]
         for p in data["products"]:
             prow.append([
-                p["product_name"], p["location"],
+                p["product_name"] + (" *" if p.get("unpriced_qty") else ""), p["location"],
                 f'{p["qty"]:,.2f} {p["unit"]}', f'${p["avg_cost"]:,.4f}', f'${p["value"]:,.2f}',
             ])
         elements.append(_make_table(prow, [150, 100, 110, 80, 80], align_right_cols=[2, 3, 4]))
@@ -8476,12 +8839,12 @@ def pdf_avg_cost(data, location, start_date_str, end_date_str):
             _report_scope_line(location, start_date_str, end_date_str),
             f"Generated {now_central_str()}",
             f'Company-wide average unit cost: ${data["company_avg_cost"]:,.4f}',
-        ])
+        ] + _unpriced_note(data))
 
         rows = [["Product", "Total Qty", "Avg Unit Cost", "Total Value"]]
         for p in data["products"]:
             rows.append([
-                p["product_name"], f'{p["total_qty"]:,.2f} {p["unit"]}',
+                p["product_name"] + (" *" if p.get("unpriced_qty") else ""), f'{p["total_qty"]:,.2f} {p["unit"]}',
                 f'${p["avg_unit_cost"]:,.4f}', f'${p["total_value"]:,.2f}',
             ])
         elements.append(_make_table(rows, [200, 130, 110, 110], align_right_cols=[1, 2, 3]))
@@ -8527,6 +8890,12 @@ def pdf_blend_cost(reports):
             if f["missing_products"]:
                 elements.append(Paragraph(
                     f'<font color="#b00020">Missing component product(s), excluded from cost: {", ".join(f["missing_products"])}</font>',
+                    styles["Normal"],
+                ))
+            if f.get("unpriced_products"):
+                elements.append(Paragraph(
+                    f'<font color="#b45309">Includes stock not yet priced by Purchasing (counted at $0): '
+                    f'{", ".join(f["unpriced_products"])}</font>',
                     styles["Normal"],
                 ))
             rows = [["Component", "Percent", "Current Unit Cost"]]
@@ -9146,7 +9515,19 @@ def _build_ledger_entry(entries: list, event_type: str, payload: dict) -> dict:
 # ---- Snapshot + diff ----
 def _layer_key(layer):
     return (str(layer.get("location") or ""), round(float(layer.get("unit_cost") or 0.0), 4),
-            str(layer.get("datetime") or ""))
+            str(layer.get("datetime") or ""), str(layer.get("src") or ""))
+
+
+def _layer_matches_entry(layer, e):
+    """Is this layer the one a transaction effect row describes?
+
+    Layers with a cost source (src) are matched without their cost, because the
+    purchaser may have priced the receipt since the transaction ran.
+    """
+    if e.get("src"):
+        return (str(layer.get("src") or "") == e["src"] and str(layer.get("location") or "") == e["location"]
+                and str(layer.get("datetime") or "") == e["datetime"])
+    return _layer_key(layer) == (e["location"], e["unit_cost"], e["datetime"], "")
 
 
 def _txn_snapshot():
@@ -9182,8 +9563,11 @@ def _txn_diff(before, after):
         for key in set(a) | set(b):
             d = a.get(key, 0.0) - b.get(key, 0.0)
             if abs(d) > TXN_EPS:
-                bulk.append({"product_id": pid, "product_name": info["name"], "unit": info["default_unit"],
-                             "location": key[0], "unit_cost": key[1], "datetime": key[2], "qty": round(d, 4)})
+                row = {"product_id": pid, "product_name": info["name"], "unit": info["default_unit"],
+                       "location": key[0], "unit_cost": key[1], "datetime": key[2], "qty": round(d, 4)}
+                if key[3]:
+                    row["src"] = key[3]
+                bulk.append(row)
     bulk.sort(key=lambda e: (e["qty"] > 0, e["product_name"] or "", e["location"]))
 
     staging = []
@@ -9398,14 +9782,19 @@ def _bulk_on_hand(prod, location):
 
 def _bulk_put_back(prod, e):
     """Return stock that the original transaction took out, at its original location and cost."""
-    key = (e["location"], e["unit_cost"], e["datetime"])
     qty = -e["qty"]
     for l in prod["layers"]:
-        if _layer_key(l) == key:
+        if _layer_matches_entry(l, e):
             l["qty"] = round(float(l["qty"]) + qty, 4)
             return
     new = {"qty": round(qty, 4), "unit": normalize_unit(prod.get("default_unit")), "unit_cost": e["unit_cost"],
            "datetime": e["datetime"], "location": e["location"]}
+    if e.get("src"):
+        # the receipt may have been priced since: put it back at today's cost for that source
+        cost, pending = source_costs().get(e["src"], (e["unit_cost"], False))
+        new.update({"unit_cost": round(cost, 4), "src": e["src"]})
+        if pending:
+            new["cost_pending"] = True
     # keep FIFO order: in front of the first layer that's newer
     idx = next((i for i, l in enumerate(prod["layers"]) if str(l.get("datetime") or "") > e["datetime"]),
                len(prod["layers"]))
@@ -9415,10 +9804,10 @@ def _bulk_put_back(prod, e):
 def _bulk_take_out(prod, e):
     """Remove stock the original transaction added: that exact layer first, then oldest at the same location."""
     need = e["qty"]
-    key = (e["location"], e["unit_cost"], e["datetime"])
     loc = e["location"].strip().lower()
-    order = [l for l in prod["layers"] if _layer_key(l) == key] + \
-            [l for l in prod["layers"] if _layer_key(l) != key and (l.get("location") or "").strip().lower() == loc]
+    order = [l for l in prod["layers"] if _layer_matches_entry(l, e)] + \
+            [l for l in prod["layers"] if not _layer_matches_entry(l, e)
+             and (l.get("location") or "").strip().lower() == loc]
     for l in order:
         if need <= TXN_EPS:
             break
@@ -9627,6 +10016,16 @@ def undo_transaction(txn_id: str, user: dict, reason: str | None):
             rec.update({"status": "undone", "undone_at": now, "undone_by": who, "undo_reason": reason,
                         "undone_txn": txn_id})
 
+    # 5b) a receive that's undone drops off the Purchasing list
+    receipts = load_purchasing()
+    undone_receipts = set()
+    if txn.get("action") == "Receive":  # not a Move, which also adds stock tagged with a receipt
+        undone_receipts = {e["src"] for e in eff.get("bulk", [])
+                           if e["qty"] > 0 and str(e.get("src") or "").startswith("RCV-")}
+    for r in receipts:
+        if r.get("id") in undone_receipts:
+            r.update({"status": "undone", "undone_at": now, "undone_by": who, "undone_txn": txn_id})
+
     if errors:
         raise UndoError("Can't undo " + txn_id + ": " + " ".join(errors))
 
@@ -9665,6 +10064,8 @@ def undo_transaction(txn_id: str, user: dict, reason: str | None):
         files[STAGING_PATH] = staging
     if eff.get("blends"):
         files[BLENDS_PATH] = blends
+    if undone_receipts:
+        files[PURCHASING_PATH] = receipts
     _commit_files(files)
     return rev_id
 

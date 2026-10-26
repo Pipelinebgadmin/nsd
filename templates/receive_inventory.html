@@ -65,9 +65,13 @@
       </div>
 
       <div class="row-form">
-        <label for="receive_unit_cost">Cost per unit *</label>
-        <input id="receive_unit_cost" name="receive_unit_cost" type="number" step="0.0001" min="0"
-               value="{{ form.get('receive_unit_cost','') }}" required>
+        <label for="po_number">PO # <span class="text-muted" style="font-weight:400;">(PO or BOL required)</span></label>
+        <input id="po_number" name="po_number" type="text" value="{{ form.get('po_number','') }}" autocomplete="off">
+      </div>
+
+      <div class="row-form">
+        <label for="bol_number">BOL #</label>
+        <input id="bol_number" name="bol_number" type="text" value="{{ form.get('bol_number','') }}" autocomplete="off">
       </div>
 
       <div class="row-form">
@@ -89,12 +93,6 @@
         <select id="tank_id" name="tank_id">
           <option value="" {% if not tid %}selected{% endif %}>No tank (store at location level)</option>
         </select>
-      </div>
-
-      <div class="row-form">
-        <label for="ref">Reference</label>
-        <input id="ref" name="ref" type="text" value="{{ form.get('ref','') }}"
-               placeholder="PO / BOL / Ticket # (optional)">
       </div>
 
       <div class="row-form">
@@ -150,4 +148,17 @@
   })();
 </script>
 
+<script>
+  // PO # or BOL # — at least one is required (the server checks too)
+  document.querySelectorAll('input[name="po_number"]').forEach(function (po) {
+    const bol = po.form && po.form.querySelector('input[name="bol_number"]');
+    if (!bol) return;
+    function check() {
+      po.setCustomValidity(po.value.trim() || bol.value.trim() ? "" : "Enter a PO # or a BOL # (or both).");
+    }
+    po.addEventListener("input", check);
+    bol.addEventListener("input", check);
+    check();
+  });
+</script>
 {% endblock %}

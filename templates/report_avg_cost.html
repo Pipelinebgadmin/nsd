@@ -59,6 +59,13 @@
   </a>
 </div>
 
+{% if data.unpriced_count %}
+<div class="alert alert-warning py-2">
+  {{ data.unpriced_count }} product{{ 's' if data.unpriced_count != 1 }} include stock that Purchasing hasn't priced yet.
+  It's counted at $0 until the price is entered.
+</div>
+{% endif %}
+
 <div class="card">
   <div class="card-header bg-white d-flex justify-content-between">
     <span class="fw-semibold">By Product</span>
@@ -78,7 +85,7 @@
         <tbody>
           {% for p in data.products %}
           <tr>
-            <td>{{ p.product_name }}</td>
+            <td>{{ p.product_name }}{% if p.unpriced_qty %} <span class="badge bg-warning text-dark" title="{{ '%g'|format(p.unpriced_qty) }} {{ p.unit|upper }} not priced yet">unpriced</span>{% endif %}</td>
             <td class="text-end">{{ '%.2f'|format(p.total_qty) }} {{ p.unit|upper }}</td>
             <td class="text-end">${{ '%.4f'|format(p.avg_unit_cost) }}</td>
             <td class="text-end">${{ '%.2f'|format(p.total_value) }}</td>
